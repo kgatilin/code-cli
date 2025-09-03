@@ -1,0 +1,54 @@
+# Claude Code CLI Configuration Example
+# All fields are optional - sensible defaults are used when not specified
+
+# Path to prompts directory (relative to CWD)
+promptsPath: ./.claude/prompts  # Default
+
+# Path to agent logs directory
+logsPath: .agent/log  # Default
+
+# Path to task files directory
+taskPath: .agent/task  # Default
+
+# Pattern for review comments (language-specific)
+# Examples:
+#   JavaScript/TypeScript: "//Review:"
+#   Python: "#Review:"
+#   HTML/XML: "<!--Review:"
+reviewPattern: "//Review:"  # Default for JS/TS projects
+
+# Directories to search for review comments
+reviewSearchPaths:
+  - src     # Default
+  - test    # Default
+  # - lib   # Add custom directories as needed
+  # - app
+
+# File extensions to search for review comments
+# Only files with these extensions will be searched
+reviewSearchExtensions:
+  - .ts     # Default - minimal for performance
+  # - .js   # Add more extensions as needed
+  # - .tsx
+  # - .jsx
+  # - .py
+  # - .go
+
+# File patterns to exclude from review comment search
+# Supports glob patterns (* wildcards) and exact matches
+reviewSearchExcludes:
+  # - "*.test.ts"      # Exclude all test files
+  # - "*.spec.ts"      # Exclude all spec files
+  # - "generated.ts"   # Exclude specific files
+  # - "build/*"        # Exclude entire directories
+
+# Prompt-to-model mappings for claude engine
+modelMappings:
+  plan: opus
+  plan_review: opus
+  decompose: opus
+  docs: opus
+  review: opus
+  aesthetics_init: opus
+  aesthetics_mini: opus
+  # Add more mappings as needed

@@ -1,0 +1,40 @@
+{
+  "name": "@local/claude-code-cli",
+  "bin": {
+    "code-cli": "./bin/cc.js"
+  },
+  "type": "module",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:watch": "vitest --watch",
+    "dev": "tsx src/cli.ts",
+    "lint": "eslint src/**/*.ts",
+    "link": "npm link"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@eslint/js": "^9.34.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.3.0",
+    "@typescript-eslint/eslint-plugin": "^8.41.0",
+    "@typescript-eslint/parser": "^8.41.0",
+    "eslint": "^9.34.0",
+    "globals": "^16.3.0",
+    "jiti": "^2.5.1",
+    "memfs": "^4.38.2",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
