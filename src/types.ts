@@ -5,6 +5,8 @@
  * Module-specific types should remain in their respective files.
  */
 
+import type { JiraConfig } from './jira-client.js';
+
 /** Supported AI engines for prompt execution */
 export type Engine = 'cursor' | 'claude';
 
@@ -136,8 +138,15 @@ export interface CommandResult {
 
 /** Options for the newtask utility command */
 export interface NewtaskOptions {
-  /** Task description provided by user */
+  /** Task description provided by user (or fetched from Jira) */
   description: string;
-  /** Optional custom branch name */
+  /** Optional custom branch name (auto-generated if not provided with Jira) */
   branch?: string;
+  /** Jira integration configuration */
+  jira?: {
+    /** Ticket ID or URL input from user */
+    input: string;
+    /** Jira connection configuration */
+    config: JiraConfig;
+  };
 }

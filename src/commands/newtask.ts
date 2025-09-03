@@ -12,15 +12,58 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { CommandResult, Config, NewtaskOptions } from '../types.js';
 import { processIncludes } from '../prompt-loader.js';
+import { loadJiraConfigFromEnv, parseJiraInput, fetchJiraTicket, validateJiraConfig } from '../jira-client.js';
 
 
 /**
  * Parses command line arguments for newtask command
+ * Supports both traditional and Jira modes:
+ * - Traditional: newtask "branch-name" "task description" 
+ * - Jira: newtask --jira <ticket-id-or-url> [branch-name]
  * @param args - Command line arguments (excluding command name)
  * @returns Parsed options
- * @throws Error if required arguments missing
+ * @throws Error if required arguments missing or invalid
  */
 function parseNewtaskArgs(args: string[]): NewtaskOptions {
+  if (args.length === 0) {
+    throw new Error('Arguments are required. Usage: code-cli newtask "branch-name" "task description" OR code-cli newtask --jira <ticket-id-or-url> [branch-name]');
+  }
+
+  // Check for Jira mode
+  if (args[0] === '--jira') {
+    if (args.length < 2) {
+      throw new Error('Jira ticket ID or URL is required after --jira flag. Usage: code-cli newtask --jira <ticket-id-or-url> [branch-name]');
+    }
+    
+    const jiraInput = args[1];
+    if (!jiraInput) {
+      throw new Error('Jira ticket ID or URL cannot be empty');
+    }
+    
+    // Optional branch name (3rd argument)
+    const customBranch = args.length >= 3 ? args[2] : undefined;
+    
+    // Load Jira configuration from environment
+    const jiraConfig = loadJiraConfigFromEnv();
+    
+    // Build options object conditionally
+    const options: NewtaskOptions = {
+      description: '', // Will be populated from Jira
+      jira: {
+        input: jiraInput,
+        config: jiraConfig
+      }
+    };
+    
+    // Only add branch if it exists
+    if (customBranch) {
+      options.branch = customBranch;
+    }
+    
+    return options;
+  }
+
+  // Traditional mode - require both branch and description
   if (args.length < 2) {
     throw new Error('Branch name and task description are required. Usage: code-cli newtask "branch-name" "task description"');
   }
@@ -37,6 +80,85 @@ function parseNewtaskArgs(args: string[]): NewtaskOptions {
   }
 
   return { description, branch };
+}
+
+/**
+ * Generates a branch name from ticket information
+ * @param ticketKey - Jira ticket key (e.g., PROJ-123)
+ * @param summary - Ticket summary text
+ * @returns Generated branch name
+ */
+function generateBranchName(ticketKey: string, summary: string): string {
+  // Use ticket key as base, add simplified summary
+  const sanitizedSummary = summary
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Replace multiple hyphens with single
+    .replace(/^-|-$/g, '') // Remove leading/trailing hyphens
+    .substring(0, 30); // Limit length
+
+  const ticketKeyLower = ticketKey.toLowerCase();
+  
+  if (sanitizedSummary) {
+    return `${ticketKeyLower}-${sanitizedSummary}`;
+  } else {
+    return ticketKeyLower;
+  }
+}
+
+/**
+ * Resolves task content and branch name from either Jira or traditional input
+ * @param options - Parsed newtask options
+ * @returns Promise resolving to resolved task information
+ */
+async function resolveTaskContent(options: NewtaskOptions): Promise<{
+  description: string;
+  branchName: string;
+  jiraTicket?: { key: string; summary: string; description: string };
+}> {
+  // Jira mode
+  if (options.jira) {
+    try {
+      // Validate Jira configuration first
+      validateJiraConfig(options.jira.config);
+      
+      // Parse Jira input to extract ticket key
+      const parsedInput = parseJiraInput(options.jira.input);
+      
+      // If URL provided a base URL, use it, otherwise use config base URL
+      const effectiveConfig = parsedInput.baseUrl
+        ? { ...options.jira.config, baseUrl: parsedInput.baseUrl }
+        : options.jira.config;
+      
+      // Fetch ticket from Jira
+      const jiraTicket = await fetchJiraTicket(parsedInput.ticketKey, effectiveConfig);
+      
+      // Generate branch name if not provided
+      const branchName = options.branch || generateBranchName(jiraTicket.key, jiraTicket.summary);
+      
+      // Combine summary and description for task content
+      const description = `**Jira Ticket**: ${jiraTicket.key}\n**Summary**: ${jiraTicket.summary}\n\n## Description\n\n${jiraTicket.description}`;
+      
+      return {
+        description,
+        branchName,
+        jiraTicket
+      };
+    } catch (error) {
+      throw new Error(`Failed to fetch Jira ticket: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+  
+  // Traditional mode
+  if (!options.branch) {
+    throw new Error('Branch name is required in traditional mode');
+  }
+  
+  return {
+    description: options.description,
+    branchName: options.branch
+  };
 }
 
 /**
@@ -138,30 +260,42 @@ export async function executeNewtask(args: string[], config: Config): Promise<Co
   try {
     // Parse arguments
     const options = parseNewtaskArgs(args);
-    const branchName = options.branch!; // Branch is now required, not optional
+
+    // Resolve task content and branch name (handles both Jira and traditional modes)
+    const resolved = await resolveTaskContent(options);
 
     // Create git branch
-    const branchResult = createGitBranch(branchName);
+    const branchResult = createGitBranch(resolved.branchName);
     if (!branchResult.success) {
       return { success: false, error: branchResult.error || 'Failed to create git branch' };
     }
 
     // Create task directory
-    const taskDir = createTaskDirectory(config.taskPath, branchName);
+    const taskDir = createTaskDirectory(config.taskPath, resolved.branchName);
 
-    // Generate task files
-    const filesResult = generateTaskFiles(taskDir, branchName, options.description, config);
+    // Generate task files with resolved content
+    const filesResult = generateTaskFiles(taskDir, resolved.branchName, resolved.description, config);
     if (!filesResult.success) {
       return { success: false, error: filesResult.error || 'Failed to generate task files' };
     }
 
-    return {
-      success: true,
-      message: `Task created successfully!
-- Branch: ${branchName}
+    // Build success message
+    let message = `Task created successfully!
+- Branch: ${resolved.branchName}
 - Directory: ${taskDir}
 - Task file: ${join(taskDir, 'task.md')}
-- Stage file: ${join(taskDir, 'stage.yaml')}`
+- Stage file: ${join(taskDir, 'stage.yaml')}`;
+
+    // Add Jira information if applicable
+    if (resolved.jiraTicket) {
+      message += `
+- Jira Ticket: ${resolved.jiraTicket.key}
+- Summary: ${resolved.jiraTicket.summary}`;
+    }
+
+    return {
+      success: true,
+      message
     };
 
   } catch (error) {

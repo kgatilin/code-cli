@@ -88,7 +88,7 @@ describe('prompt-loader', () => {
         expect(error).toBeInstanceOf(Error);
         const errorMessage = (error as Error).message;
         expect(errorMessage).toContain('Prompt file not found: missing.md');
-        expect(errorMessage).toContain('Available prompts:');
+        expect(errorMessage).toContain('Available local prompts:');
         expect(errorMessage).toContain('available1');
         expect(errorMessage).toContain('available2');
       }
@@ -98,7 +98,7 @@ describe('prompt-loader', () => {
       const nonexistentPath = join(testDir, 'nonexistent');
       
       const configWithNonexistentPath = createTestConfig({ promptsPath: nonexistentPath });
-      expect(() => loadPrompt('test', configWithNonexistentPath)).toThrow('Prompts directory not found');
+      expect(() => loadPrompt('test', configWithNonexistentPath)).toThrow('Prompt file not found: test.md');
     });
   });
 

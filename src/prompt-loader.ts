@@ -17,25 +17,40 @@ import type { PlaceholderContext, Config } from './types.js';
  * @throws Error if prompt file not found, prompts directory doesn't exist, or circular dependency detected
  */
 export function loadPrompt(promptName: string, config: Config): string {
-  const promptsPath = config.promptsPath;
-  if (!existsSync(promptsPath)) {
-    throw new Error('Prompts directory not found: ' + promptsPath);
-  }
-
-  const promptFilePath = join(promptsPath, `${promptName}.md`);
+  // Try local prompts path first
+  const localPromptsPath = config.promptsPath;
+  const localPromptFilePath = join(localPromptsPath, `${promptName}.md`);
   
-  if (!existsSync(promptFilePath)) {
-    const availablePrompts = listAvailablePrompts(promptsPath);
+  // Try global prompts path as fallback
+  const globalPromptsPath = config.globalPaths.prompts;
+  const globalPromptFilePath = join(globalPromptsPath, `${promptName}.md`);
+  
+  let promptFilePath: string;
+  let rawContent: string;
+  
+  // Check local first, then global
+  if (existsSync(localPromptFilePath)) {
+    promptFilePath = localPromptFilePath;
+  } else if (existsSync(globalPromptFilePath)) {
+    promptFilePath = globalPromptFilePath;
+  } else {
+    // Neither exists, provide helpful error message
+    const localPrompts = listAvailablePrompts(localPromptsPath);
+    const globalPrompts = listAvailablePrompts(globalPromptsPath);
+    
     let errorMessage = `Prompt file not found: ${promptName}.md`;
     
-    if (availablePrompts.length > 0) {
-      errorMessage += `\n\nAvailable prompts:\n${availablePrompts.map(p => `  - ${p}`).join('\n')}`;
+    if (localPrompts.length > 0) {
+      errorMessage += `\n\nAvailable local prompts:\n${localPrompts.map(p => `  - ${p}`).join('\n')}`;
+    }
+    
+    if (globalPrompts.length > 0) {
+      errorMessage += `\n\nAvailable global prompts:\n${globalPrompts.map(p => `  - ${p}`).join('\n')}`;
     }
     
     throw new Error(errorMessage);
   }
 
-  let rawContent: string;
   try {
     rawContent = readFileSync(promptFilePath, 'utf8');
   } catch {
