@@ -3,3 +3,4 @@ reviewSearchExcludes:
 
 modelMappings:
   plan_new: opus
+  decompose: opus

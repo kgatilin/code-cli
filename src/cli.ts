@@ -15,7 +15,7 @@ import { executeUtilityCommand } from './commands/index.js';
 import type { CliOptions, Engine, PlaceholderContext } from './types.js';
 
 /** Reserved commands that trigger utility command mode */
-const RESERVED_COMMANDS = ['newtask', 'init', 'list'] as const;
+const RESERVED_COMMANDS = ['newtask', 'init', 'list', 'agents'] as const;
 
 /** Command type detection result */
 type CommandType = 'prompt' | 'utility';

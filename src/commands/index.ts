@@ -9,6 +9,7 @@ import type { CommandResult, Config } from '../types.js';
 import { executeNewtask } from './newtask.js';
 import { executeInit } from './init.js';
 import { executeList } from './list.js';
+import { executeAgents } from './agents.js';
 
 /** Interface for utility command implementation */
 export interface UtilityCommand {
@@ -36,6 +37,11 @@ const COMMAND_REGISTRY: Record<string, UtilityCommand> = {
     name: 'list',
     description: 'List available resources. Options: --prompts, --templates, --snippets, --local, --global',
     execute: executeList
+  },
+  agents: {
+    name: 'agents',
+    description: 'Manage local LLM proxy server. Actions: start, stop, status, restart',
+    execute: executeAgents
   }
 };
 
