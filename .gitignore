@@ -4,3 +4,6 @@ dist
 # Global resource symlinks (managed by claude-code-cli)
 .claude/*/global
 docs/js-gen-ai
+
+# Test folders
+test-home-*

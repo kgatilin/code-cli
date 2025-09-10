@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.19.0",
+    "@modelcontextprotocol/sdk": "^1.17.5",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",

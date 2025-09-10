@@ -2,5 +2,7 @@ reviewSearchExcludes:
   - src/config-loader.ts
 
 modelMappings:
-  plan_new: opus
+  plan: opus
+  review: opus
   decompose: opus
+  update_docs: opus

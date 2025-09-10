@@ -1,4 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, mcpToTool } from '@google/genai';
+import type { CallableTool, GenerationConfig } from '@google/genai';
 import type { 
   OpenAIRequest, 
   OpenAIResponse, 
@@ -7,7 +8,9 @@ import type {
   OpenAIContentPart,
   AgentConfig 
 } from '../types.js';
-import { logDebug, logInfo, logError } from './logger.js';
+import { logDebug, logInfo, logError, logWarning } from './logger.js';
+import { MCPClientManager } from './mcp-client-manager.js';
+import { loadMCPConfig } from './mcp-config.js';
 
 /**
  * Agent orchestrator for LLM interactions using Google Vertex AI
@@ -16,6 +19,8 @@ import { logDebug, logInfo, logError } from './logger.js';
 export class AgentOrchestrator {
   private genai: GoogleGenAI;
   private model: string;
+  private mcpClientManager?: MCPClientManager;
+  private mcpInitializationPromise?: Promise<void>;
 
   constructor(private config: AgentConfig) {
     // Initialize Google Generative AI client
@@ -31,6 +36,70 @@ export class AgentOrchestrator {
       location: config.VERTEX_AI_LOCATION,
       model: config.VERTEX_AI_MODEL
     });
+
+    // Initialize MCP client manager asynchronously
+    this.mcpInitializationPromise = this.initializeMCPClients();
+  }
+
+  /**
+   * Initialize MCP clients asynchronously
+   */
+  private async initializeMCPClients(): Promise<void> {
+    try {
+      logDebug('Orchestrator', 'Loading MCP configuration');
+      const mcpConfig = await loadMCPConfig();
+      
+      if (Object.keys(mcpConfig.mcpServers).length === 0) {
+        logDebug('Orchestrator', 'No MCP servers configured, skipping MCP initialization');
+        return;
+      }
+
+      logInfo('Orchestrator', 'Initializing MCP client manager', {
+        serverCount: Object.keys(mcpConfig.mcpServers).length
+      });
+
+      this.mcpClientManager = new MCPClientManager();
+      const connectedClients = await this.mcpClientManager.createClients(mcpConfig);
+      
+      logInfo('Orchestrator', 'MCP client manager initialized', {
+        totalServers: Object.keys(mcpConfig.mcpServers).length,
+        connectedClients: connectedClients.length
+      });
+    } catch (error) {
+      logWarning('Orchestrator', 'Failed to initialize MCP clients', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      // Continue without MCP support
+    }
+  }
+
+  /**
+   * Build MCP tools from connected clients
+   */
+  private async buildMCPTools(): Promise<CallableTool[]> {
+    try {
+      // Wait for MCP initialization to complete
+      if (this.mcpInitializationPromise) {
+        await this.mcpInitializationPromise;
+      }
+
+      const clients = this.mcpClientManager?.getClients() || [];
+      if (clients.length === 0) {
+        return [];
+      }
+
+      logDebug('Orchestrator', 'Building MCP tools', { clientCount: clients.length });
+      
+      const tools = clients.map(client => mcpToTool(client));
+      
+      logDebug('Orchestrator', 'Built MCP tools successfully', { toolCount: tools.length });
+      return tools;
+    } catch (error) {
+      logWarning('Orchestrator', 'Error building MCP tools', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return [];
+    }
   }
 
   /**
@@ -52,17 +121,28 @@ export class AgentOrchestrator {
         systemInstructions: systemInstructions
       });
 
+      // Build MCP tools if available
+      const tools = await this.buildMCPTools();
+      
       // Generate response using Google AI
+      const config = {
+        systemInstruction: systemInstructions,
+        temperature: request.temperature ?? 0.7,
+        maxOutputTokens: request.max_tokens ?? 4096,
+        topK: 40,
+        topP: 0.95,
+      } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
+
+      // Add tools if available
+      if (tools.length > 0) {
+        config.tools = tools;
+        logDebug('Orchestrator', 'Including MCP tools in request', { toolCount: tools.length });
+      }
+
       const response = await this.genai.models.generateContent({
         model: this.model,
         contents,
-        config: {
-          systemInstruction: systemInstructions,
-          temperature: request.temperature ?? 0.7,
-          maxOutputTokens: request.max_tokens ?? 4096,
-          topK: 40,
-          topP: 0.95,
-        },
+        config,
       });
 
       // Convert response back to OpenAI format
@@ -101,17 +181,28 @@ export class AgentOrchestrator {
         systemInstructions: systemInstructions
       });
 
+      // Build MCP tools if available
+      const tools = await this.buildMCPTools();
+      
       // Generate streaming response using Google AI
+      const config = {
+        systemInstruction: systemInstructions,
+        temperature: request.temperature ?? 0.7,
+        maxOutputTokens: request.max_tokens ?? 4096,
+        topK: 40,
+        topP: 0.95,
+      } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
+
+      // Add tools if available
+      if (tools.length > 0) {
+        config.tools = tools;
+        logDebug('Orchestrator', 'Including MCP tools in streaming request', { toolCount: tools.length });
+      }
+
       const stream = await this.genai.models.generateContentStream({
         model: this.model,
         contents,
-        config: {
-          systemInstruction: systemInstructions,
-          temperature: request.temperature ?? 0.7,
-          maxOutputTokens: request.max_tokens ?? 4096,
-          topK: 40,
-          topP: 0.95,
-        },
+        config,
       });
 
       const chatId = `chatcmpl-${Date.now()}`;
@@ -284,5 +375,21 @@ export class AgentOrchestrator {
    */
   private estimateTokens(text: string): number {
     return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Shutdown the orchestrator and clean up MCP resources
+   */
+  async shutdown(): Promise<void> {
+    try {
+      if (this.mcpClientManager && !this.mcpClientManager.isManagerShutdown()) {
+        logInfo('Orchestrator', 'Shutting down MCP client manager');
+        await this.mcpClientManager.shutdown();
+      }
+    } catch (error) {
+      logError('Orchestrator', 'Error during shutdown', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
 }

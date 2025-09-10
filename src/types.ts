@@ -326,3 +326,17 @@ export interface OpenAIStreamErrorChunk {
     code?: string | null;
   };
 }
+
+/** Configuration for a single MCP server */
+export interface MCPServerConfig {
+  /** Command to execute for the MCP server */
+  command: string;
+  /** Arguments to pass to the MCP server command */
+  args: string[];
+}
+
+/** MCP configuration loaded from ~/.code-cli/mcp.json */
+export interface MCPConfig {
+  /** Map of MCP server name to configuration */
+  mcpServers: Record<string, MCPServerConfig>;
+}

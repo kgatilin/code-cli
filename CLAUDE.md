@@ -30,10 +30,12 @@ npm run dev        # Direct TS execution via tsx for testing
 ### Agents Module
 - **agents/config.ts**: Environment configuration management for agent proxy server
 - **agents/server.ts**: Express.js server providing OpenAI-compatible API endpoints
-- **agents/orchestrator.ts**: OpenAI to Google Vertex AI format conversion and request orchestration
+- **agents/orchestrator.ts**: OpenAI to Google Vertex AI format conversion, request orchestration, and MCP tool integration via SDK's mcpToTool()
 - **agents/process-manager.ts**: Background server process lifecycle management with PID tracking
 - **agents/error-handler.ts**: Google AI error parsing and OpenAI-compatible error formatting
 - **agents/logger.ts**: File-based logging system with EPIPE resilience for detached processes
+- **agents/mcp-config.ts**: Loads MCP server configurations from ~/.code-cli/mcp.json with validation
+- **agents/mcp-client-manager.ts**: Manages MCP client lifecycle using SDK's Client and StdioClientTransport
 
 ### Command System
 - **commands/index.ts**: Router for utility commands
@@ -86,13 +88,25 @@ PROXY_PORT=11434                     # Optional: Server port (default: 11434)
 DEBUG_MODE=false                     # Optional: Enable debug logging (default: false)
 ```
 
+MCP server configuration via `~/.code-cli/mcp.json`:
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
+    }
+  }
+}
+```
+
 ## Testing Strategy
 
 - **Test Framework**: Vitest with Node environment
 - **Test Location**: `tests/` directory mirrors `src/` structure
 - **Mock Strategy**: Use `memfs` for file system operations, minimal mocking elsewhere
 - **Coverage**: All core modules have comprehensive test suites
-- **Agent Testing**: Extensive test coverage with 15 test suites for agents module (config, server, orchestrator, process management, error handling, logging)
+- **Agent Testing**: Extensive test coverage with 18 test suites for agents module including MCP integration (config, server, orchestrator, process management, error handling, logging, MCP config, MCP client manager)
 - **Run Single Test**: `npx vitest run tests/prompt-loader.test.ts`
 
 ## Include System

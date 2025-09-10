@@ -10,7 +10,7 @@ A powerful command-line interface for executing AI-powered prompts through Claud
 - 🎯 **Task Management**: Create and organize development tasks with branches and structured files
 - 🌍 **Global Resources**: Share prompts and templates across projects
 - ⚙️ **Flexible Configuration**: Customize paths, patterns, and model mappings via YAML
-- 🚀 **Local LLM Proxy**: OpenAI-compatible local server that proxies requests to Google Vertex AI
+- 🚀 **Local LLM Proxy**: OpenAI-compatible local server that proxies requests to Google Vertex AI with MCP tool support
 
 ## Installation
 
@@ -141,6 +141,28 @@ VERTEX_AI_MODEL=gemini-2.0-flash-exp
 PROXY_PORT=11434        # Default port (Ollama-compatible)
 DEBUG_MODE=false        # Enable debug logging
 ```
+
+#### MCP Tool Support
+
+The proxy server supports MCP (Model Context Protocol) tools. Configure MCP servers in `~/.code-cli/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/Users/your-username/Documents",
+        "/Users/your-username/Projects"
+      ]
+    }
+  }
+}
+```
+
+When the proxy server starts, it automatically loads configured MCP servers and makes their tools available to the LLM.
 
 ## Prompt Templates
 
