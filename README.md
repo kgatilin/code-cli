@@ -10,6 +10,7 @@ A powerful command-line interface for executing AI-powered prompts through Claud
 - 🎯 **Task Management**: Create and organize development tasks with branches and structured files
 - 🌍 **Global Resources**: Share prompts and templates across projects
 - ⚙️ **Flexible Configuration**: Customize paths, patterns, and model mappings via YAML
+- 🚀 **Local LLM Proxy**: OpenAI-compatible local server that proxies requests to Google Vertex AI
 
 ## Installation
 
@@ -80,6 +81,22 @@ code-cli list templates
 code-cli list snippets
 ```
 
+### LLM Proxy Server
+
+```bash
+# Start local OpenAI-compatible server (proxies to Google Vertex AI)
+code-cli agents start
+
+# Check server status and configuration
+code-cli agents status
+
+# Stop the server
+code-cli agents stop
+
+# Restart the server
+code-cli agents restart
+```
+
 ## Configuration
 
 Create a `.cc.yaml` file in your project root:
@@ -108,6 +125,21 @@ modelMappings:
   plan: opus          # Use Opus for planning
   implement: sonnet   # Use Sonnet for implementation
   review: opus        # Use Opus for code review
+```
+
+### Agent Proxy Configuration
+
+For the local LLM proxy server, create `~/.code-cli/.env`:
+
+```bash
+# Required: Google Cloud settings
+VERTEX_AI_PROJECT=your-gcp-project
+VERTEX_AI_LOCATION=us-central1
+VERTEX_AI_MODEL=gemini-2.0-flash-exp
+
+# Optional: Server settings
+PROXY_PORT=11434        # Default port (Ollama-compatible)
+DEBUG_MODE=false        # Enable debug logging
 ```
 
 ## Prompt Templates
@@ -165,6 +197,7 @@ Share resources across projects by placing them in `~/.claude/`:
 - Node.js 18+ 
 - TypeScript 5+
 - Git
+- Google Cloud credentials (for LLM proxy feature): Run `gcloud auth application-default login`
 
 ### Commands
 
@@ -241,6 +274,20 @@ code-cli test "write unit tests"
 
 # Stage 4: Documentation
 code-cli docs "update API documentation"
+```
+
+### Local LLM Integration
+
+```bash
+# Start the proxy server
+code-cli agents start
+
+# In your applications (e.g., Obsidian Copilot):
+# Set API endpoint to: http://localhost:11434
+# The server provides OpenAI-compatible API powered by Google Vertex AI
+
+# Monitor server logs (if DEBUG_MODE=true)
+tail -f ~/.code-cli/agent.log
 ```
 
 ## Engine Requirements

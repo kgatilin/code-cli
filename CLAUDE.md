@@ -27,11 +27,20 @@ npm run dev        # Direct TS execution via tsx for testing
 - **global-resources.ts**: Manages global prompt/template resources in user home directory
 - **types.ts**: Shared TypeScript interfaces and type definitions
 
+### Agents Module
+- **agents/config.ts**: Environment configuration management for agent proxy server
+- **agents/server.ts**: Express.js server providing OpenAI-compatible API endpoints
+- **agents/orchestrator.ts**: OpenAI to Google Vertex AI format conversion and request orchestration
+- **agents/process-manager.ts**: Background server process lifecycle management with PID tracking
+- **agents/error-handler.ts**: Google AI error parsing and OpenAI-compatible error formatting
+- **agents/logger.ts**: File-based logging system with EPIPE resilience for detached processes
+
 ### Command System
 - **commands/index.ts**: Router for utility commands
 - **commands/init.ts**: Initializes new projects with `.cc.yaml` and prompt structure
 - **commands/list.ts**: Lists available prompts, templates, and snippets
 - **commands/newtask.ts**: Creates new task branches with directory structure
+- **commands/agents.ts**: Manages local LLM proxy server with start/stop/status/restart actions
 
 ## How It Works
 
@@ -49,6 +58,7 @@ npm run dev        # Direct TS execution via tsx for testing
 - `code-cli init`: Set up new project with prompts structure
 - `code-cli list [type]`: Show available prompts/templates/snippets
 - `code-cli newtask "task-description"`: Create task branch and files
+- `code-cli agents [action]`: Manage local LLM proxy server (start/stop/status/restart)
 
 ## Configuration
 
@@ -67,12 +77,22 @@ modelMappings:                       # Prompt-to-model mapping
   implement: sonnet
 ```
 
+Agent proxy configuration via `~/.code-cli/.env`:
+```bash
+VERTEX_AI_PROJECT=your-gcp-project   # Required: Google Cloud project ID
+VERTEX_AI_LOCATION=us-central1       # Required: Vertex AI region
+VERTEX_AI_MODEL=gemini-2.0-flash-exp # Required: Model name
+PROXY_PORT=11434                     # Optional: Server port (default: 11434)
+DEBUG_MODE=false                     # Optional: Enable debug logging (default: false)
+```
+
 ## Testing Strategy
 
 - **Test Framework**: Vitest with Node environment
 - **Test Location**: `tests/` directory mirrors `src/` structure
 - **Mock Strategy**: Use `memfs` for file system operations, minimal mocking elsewhere
 - **Coverage**: All core modules have comprehensive test suites
+- **Agent Testing**: Extensive test coverage with 15 test suites for agents module (config, server, orchestrator, process management, error handling, logging)
 - **Run Single Test**: `npx vitest run tests/prompt-loader.test.ts`
 
 ## Include System
