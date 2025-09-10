@@ -14,11 +14,18 @@ const mockGoogleGenAI = {
 
 vi.mock('@google/genai', () => ({
   GoogleGenAI: vi.fn().mockImplementation(() => mockGoogleGenAI),
-  mcpToTool: vi.fn().mockImplementation((client: Client) => ({ 
-    type: 'function',
-    name: `mcp_tool_${client.name}`,
-    description: 'MCP tool converted via mcpToTool'
-  }))
+  mcpToTool: vi.fn().mockImplementation((...args) => {
+    // Handle spread clients and optional config
+    const clients = args.slice(0, -1) as Client[];
+    const config = args[args.length - 1];
+    
+    // Return appropriate tool structure - single tool for all clients
+    return {
+      type: 'function',
+      name: 'mcp_aggregated_tool',
+      description: `MCP tool for ${clients.length} client(s)`
+    };
+  })
 }));
 
 // Mock MCP Client Manager
@@ -156,8 +163,8 @@ describe('agents/orchestrator', () => {
           tools: expect.arrayContaining([
             expect.objectContaining({
               type: 'function',
-              name: 'mcp_tool_filesystem-client',
-              description: 'MCP tool converted via mcpToTool'
+              name: 'mcp_aggregated_tool',
+              description: 'MCP tool for 1 client(s)'
             })
           ]),
           systemInstruction: expect.any(String),
@@ -168,7 +175,7 @@ describe('agents/orchestrator', () => {
         })
       });
 
-      expect(mcpToTool).toHaveBeenCalledWith(mockClient);
+      expect(mcpToTool).toHaveBeenCalledWith(mockClient, {});
       expect(response.choices[0].message.content).toBe('Response with MCP tools available');
     });
 
@@ -267,19 +274,17 @@ describe('agents/orchestrator', () => {
           config: expect.objectContaining({
             tools: expect.arrayContaining([
               expect.objectContaining({
-                name: 'mcp_tool_filesystem-client'
-              }),
-              expect.objectContaining({
-                name: 'mcp_tool_outlook-client'
+                type: 'function',
+                name: 'mcp_aggregated_tool',
+                description: 'MCP tool for 2 client(s)'
               })
             ])
           })
         })
       );
 
-      expect(mcpToTool).toHaveBeenCalledTimes(2);
-      expect(mcpToTool).toHaveBeenCalledWith(mockClients[0]);
-      expect(mcpToTool).toHaveBeenCalledWith(mockClients[1]);
+      expect(mcpToTool).toHaveBeenCalledTimes(1);
+      expect(mcpToTool).toHaveBeenCalledWith(mockClients[0], mockClients[1], {});
     });
   });
 
@@ -339,13 +344,14 @@ describe('agents/orchestrator', () => {
           tools: expect.arrayContaining([
             expect.objectContaining({
               type: 'function',
-              name: 'mcp_tool_filesystem-client'
+              name: 'mcp_aggregated_tool',
+              description: 'MCP tool for 1 client(s)'
             })
           ])
         })
       });
 
-      expect(mcpToTool).toHaveBeenCalledWith(mockClient);
+      expect(mcpToTool).toHaveBeenCalledWith(mockClient, {});
     });
   });
 

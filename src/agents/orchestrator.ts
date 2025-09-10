@@ -90,7 +90,11 @@ export class AgentOrchestrator {
 
       logDebug('Orchestrator', 'Building MCP tools', { clientCount: clients.length });
       
-      const tools = clients.map(client => mcpToTool(client));
+      // FIX: Pass all clients at once to mcpToTool
+      const tool = mcpToTool(...clients, {});
+      
+      // mcpToTool always returns a single CallableTool, wrap in array
+      const tools = [tool];
       
       logDebug('Orchestrator', 'Built MCP tools successfully', { toolCount: tools.length });
       return tools;

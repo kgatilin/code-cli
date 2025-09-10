@@ -1,5 +1,5 @@
 {
-  "name": "@local/claude-code-cli",
+  "name": "@local/code-cli",
   "bin": {
     "code-cli": "./bin/cc.js"
   },
