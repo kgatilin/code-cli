@@ -1,10 +1,10 @@
-import { describe, test, expect } from 'vitest';
-import { ErrorHandler } from '../src/agents/error-handler.js';
-import type { OpenAIError, OpenAIStreamErrorChunk } from '../src/types.js';
+import { describe, it, expect } from 'vitest';
+import { ErrorHandler } from '../../src/agents/error-handler.js';
+import type { OpenAIError, OpenAIStreamErrorChunk } from '../../src/types.js';
 
-describe('ErrorHandler', () => {
+describe('agents/error-handler', () => {
   describe('parseGoogleError', () => {
-    test('should parse Google authentication error from Error object', () => {
+    it('converts Google authentication error from Error object', () => {
       const googleErrorJson = JSON.stringify({
         error: 'invalid_grant',
         error_description: 'reauth related error (invalid_rapt)',
@@ -25,7 +25,7 @@ describe('ErrorHandler', () => {
       } as OpenAIError);
     });
 
-    test('should parse Google permission error', () => {
+    it('converts Google permission error correctly', () => {
       const googleErrorJson = JSON.stringify({
         error: 'permission_denied',
         error_description: 'Access denied to resource'
@@ -39,7 +39,7 @@ describe('ErrorHandler', () => {
       expect(result.error.code).toBe('permission_denied');
     });
 
-    test('should parse Google rate limit error', () => {
+    it('converts Google rate limit error correctly', () => {
       const googleErrorJson = JSON.stringify({
         error: 'rate_limit_exceeded',
         error_description: 'Too many requests'
@@ -53,7 +53,7 @@ describe('ErrorHandler', () => {
       expect(result.error.code).toBe('rate_limit_exceeded');
     });
 
-    test('should handle non-JSON error messages', () => {
+    it('handles non-JSON error messages gracefully', () => {
       const error = new Error('Generic error message');
       const result = ErrorHandler.parseGoogleError(error);
 
@@ -67,7 +67,7 @@ describe('ErrorHandler', () => {
       } as OpenAIError);
     });
 
-    test('should handle string errors with JSON content', () => {
+    it('processes string errors with JSON content', () => {
       const googleErrorJson = JSON.stringify({
         error: 'invalid_request',
         error_description: 'Invalid parameter'
@@ -80,7 +80,7 @@ describe('ErrorHandler', () => {
       expect(result.error.code).toBe('invalid_request');
     });
 
-    test('should handle string errors without JSON', () => {
+    it('handles string errors without JSON content', () => {
       const result = ErrorHandler.parseGoogleError('Simple error string');
 
       expect(result).toMatchObject({
@@ -93,7 +93,7 @@ describe('ErrorHandler', () => {
       } as OpenAIError);
     });
 
-    test('should handle undefined/null errors', () => {
+    it('handles undefined and null errors safely', () => {
       const result = ErrorHandler.parseGoogleError(undefined);
 
       expect(result).toMatchObject({
@@ -106,7 +106,7 @@ describe('ErrorHandler', () => {
       } as OpenAIError);
     });
 
-    test('should handle errors with only error field', () => {
+    it('processes errors with only error field', () => {
       const googleErrorJson = JSON.stringify({
         error: 'not_found'
       });
@@ -119,7 +119,7 @@ describe('ErrorHandler', () => {
       expect(result.error.code).toBe('not_found');
     });
 
-    test('should handle errors with only error_description field', () => {
+    it('processes errors with only error_description field', () => {
       const googleErrorJson = JSON.stringify({
         error_description: 'Something went wrong'
       });
@@ -134,7 +134,7 @@ describe('ErrorHandler', () => {
   });
 
   describe('createStreamingErrorChunk', () => {
-    test('should create streaming error chunk from Google error', () => {
+    it('creates streaming error chunk from Google error', () => {
       const googleErrorJson = JSON.stringify({
         error: 'invalid_grant',
         error_description: 'reauth related error (invalid_rapt)',
@@ -162,7 +162,7 @@ describe('ErrorHandler', () => {
       expect(result.created).toBeLessThanOrEqual(now);
     });
 
-    test('should create streaming error chunk with unique IDs', () => {
+    it('generates unique IDs for streaming error chunks', () => {
       const error = new Error('Test error');
       
       const chunk1 = ErrorHandler.createStreamingErrorChunk(error);
@@ -175,7 +175,7 @@ describe('ErrorHandler', () => {
   });
 
   describe('isAuthenticationError', () => {
-    test('should identify authentication errors', () => {
+    it('identifies authentication errors correctly', () => {
       const authErrors = [
         JSON.stringify({ error: 'invalid_grant' }),
         JSON.stringify({ error: 'unauthorized' }),
@@ -189,7 +189,7 @@ describe('ErrorHandler', () => {
       });
     });
 
-    test('should not identify non-authentication errors', () => {
+    it('correctly identifies non-authentication errors', () => {
       const nonAuthErrors = [
         JSON.stringify({ error: 'rate_limit_exceeded' }),
         JSON.stringify({ error: 'permission_denied' }),
@@ -203,7 +203,7 @@ describe('ErrorHandler', () => {
       });
     });
 
-    test('should handle malformed errors gracefully', () => {
+    it('handles malformed errors gracefully', () => {
       expect(ErrorHandler.isAuthenticationError(undefined)).toBe(false);
       expect(ErrorHandler.isAuthenticationError(null)).toBe(false);
       expect(ErrorHandler.isAuthenticationError({})).toBe(false);
@@ -211,7 +211,7 @@ describe('ErrorHandler', () => {
   });
 
   describe('extractErrorCode', () => {
-    test('should extract error code from Google error', () => {
+    it('extracts error code from Google error', () => {
       const googleErrorJson = JSON.stringify({
         error: 'invalid_grant',
         error_description: 'reauth related error'
@@ -223,14 +223,14 @@ describe('ErrorHandler', () => {
       expect(result).toBe('invalid_grant');
     });
 
-    test('should return null for errors without error code', () => {
+    it('returns null for errors without error code', () => {
       const error = new Error('Simple error message');
       const result = ErrorHandler.extractErrorCode(error);
 
       expect(result).toBe(null);
     });
 
-    test('should handle malformed errors gracefully', () => {
+    it('handles malformed errors gracefully', () => {
       expect(ErrorHandler.extractErrorCode(undefined)).toBe(null);
       expect(ErrorHandler.extractErrorCode(null)).toBe(null);
       expect(ErrorHandler.extractErrorCode({})).toBe(null);
@@ -258,7 +258,7 @@ describe('ErrorHandler', () => {
     ];
 
     errorTypeMappings.forEach(({ input, expected }) => {
-      test(`should map '${input}' to '${expected}'`, () => {
+      it(`maps '${input}' to '${expected}'`, () => {
         const googleErrorJson = JSON.stringify({ error: input });
         const error = new Error(googleErrorJson);
         const result = ErrorHandler.parseGoogleError(error);

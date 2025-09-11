@@ -50,3 +50,28 @@ export type {
   CleanupOptions,
   CleanupResult
 } from './cleanup-manager';
+
+// Phase 4: Agent-Specific Test Infrastructure
+export {
+  mockHelpers,
+  testDataGenerators,
+  testAssertions,
+  testEnvironmentHelpers,
+  requestResponseHelpers
+} from './agent-test-helpers';
+
+export {
+  createMockMCPClient,
+  createMockMCPClientManager,
+  createMockGoogleGenAI,
+  createMockOrchestrator,
+  createMockFileSystem,
+  createMockChildProcess,
+  createMockHttpServer,
+  createMockExpressApp,
+  createMockLogger,
+  createMockProcessKill,
+  createMockPortChecker,
+  createMockError,
+  mockSets
+} from './mock-factories';

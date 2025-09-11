@@ -1,15 +1,15 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
-import { createServer } from '../src/agents/server.js';
-import type { AgentConfig } from '../src/types.js';
-import { AgentOrchestrator } from '../src/agents/orchestrator.js';
+import { createServer } from '../../src/agents/server.js';
+import type { AgentConfig } from '../../src/types.js';
+import { AgentOrchestrator } from '../../src/agents/orchestrator.js';
 
 // Mock the orchestrator to simulate Google AI errors
-vi.mock('../src/agents/orchestrator.js');
+vi.mock('../../src/agents/orchestrator.js');
 const MockedOrchestrator = vi.mocked(AgentOrchestrator);
 
 // Mock logger to prevent console output during tests
-vi.mock('../src/agents/logger.js', () => ({
+vi.mock('../../src/agents/logger.js', () => ({
   logDebug: vi.fn(),
   logInfo: vi.fn(),
   logWarning: vi.fn(),

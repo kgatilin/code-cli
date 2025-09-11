@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { 
   TestEnvironment, 
   registerCleanup, 
   executeAllCleanups 
-} from './utils/index.js';
+} from '../utils/index.js';
 
 // Create safe test environment
 const testEnv = new TestEnvironment({ debug: false });
@@ -21,7 +21,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 // Import after mocking
-import { loadAgentConfig, getAgentConfigPath } from '../src/agents/config.js';
+import { loadAgentConfig, getAgentConfigPath } from '../../src/agents/config.js';
 
 describe('agents/config', () => {
   let testCodeCliDir: string;
@@ -40,25 +40,23 @@ describe('agents/config', () => {
 
     // Register cleanup for this test
     registerCleanup(async () => {
-      // Clean up test files safely
       testEnv.cleanupSafely(testHomeDir);
     });
   });
 
   afterEach(async () => {
-    // Execute all registered cleanups
     await executeAllCleanups();
   });
 
   describe('getAgentConfigPath', () => {
-    it('should return the correct config file path', () => {
+    it('returns the correct config file path', () => {
       const expectedPath = join(testHomeDir, '.code-cli', '.env');
       expect(getAgentConfigPath()).toBe(expectedPath);
     });
   });
 
   describe('loadAgentConfig', () => {
-    it('should load valid configuration with all required fields', () => {
+    it('loads valid configuration with all required fields', () => {
       const envContent = [
         'VERTEX_AI_PROJECT=test-project',
         'VERTEX_AI_LOCATION=us-central1',
@@ -78,7 +76,7 @@ describe('agents/config', () => {
       expect(config.DEBUG_MODE).toBe(true);
     });
 
-    it('should use default values for optional fields', () => {
+    it('applies default values for optional fields', () => {
       const envContent = [
         'VERTEX_AI_PROJECT=test-project',
         'VERTEX_AI_LOCATION=us-central1',
@@ -93,7 +91,7 @@ describe('agents/config', () => {
       expect(config.DEBUG_MODE).toBe(false); // default
     });
 
-    it('should handle quoted values', () => {
+    it('handles quoted values correctly', () => {
       const envContent = [
         'VERTEX_AI_PROJECT="test-project"',
         "VERTEX_AI_LOCATION='us-central1'",
@@ -108,7 +106,7 @@ describe('agents/config', () => {
       expect(config.VERTEX_AI_LOCATION).toBe('us-central1');
     });
 
-    it('should ignore comments and empty lines', () => {
+    it('ignores comments and empty lines', () => {
       const envContent = [
         '# This is a comment',
         '',
@@ -128,13 +126,13 @@ describe('agents/config', () => {
       expect(config.VERTEX_AI_MODEL).toBe('gemini-2.0-flash-exp');
     });
 
-    it('should throw error when config file does not exist', () => {
+    it('throws error when config file does not exist', () => {
       expect(() => loadAgentConfig()).toThrow(/Configuration file not found/);
     });
 
-    it('should throw error when required variables are missing', () => {
+    it('throws error when required variables are missing', () => {
       const envContent = [
-        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_PROJECT=test-project'
         // Missing VERTEX_AI_LOCATION and VERTEX_AI_MODEL
       ].join('\n');
       
@@ -143,7 +141,7 @@ describe('agents/config', () => {
       expect(() => loadAgentConfig()).toThrow(/Missing required environment variables/);
     });
 
-    it('should throw error when required variables are empty', () => {
+    it('throws error when required variables are empty', () => {
       const envContent = [
         'VERTEX_AI_PROJECT=',
         'VERTEX_AI_LOCATION=us-central1',
@@ -155,7 +153,7 @@ describe('agents/config', () => {
       expect(() => loadAgentConfig()).toThrow(/Missing required environment variables/);
     });
 
-    it('should throw error for invalid port number', () => {
+    it('validates port number is numeric', () => {
       const envContent = [
         'VERTEX_AI_PROJECT=test-project',
         'VERTEX_AI_LOCATION=us-central1',
@@ -168,7 +166,7 @@ describe('agents/config', () => {
       expect(() => loadAgentConfig()).toThrow(/Invalid PROXY_PORT/);
     });
 
-    it('should throw error for port number out of range', () => {
+    it('validates port number is within valid range', () => {
       const envContent = [
         'VERTEX_AI_PROJECT=test-project',
         'VERTEX_AI_LOCATION=us-central1',
@@ -181,7 +179,7 @@ describe('agents/config', () => {
       expect(() => loadAgentConfig()).toThrow(/Invalid PROXY_PORT/);
     });
 
-    it('should handle boolean values correctly', () => {
+    it('parses boolean values correctly', () => {
       const testCases = [
         { value: 'true', expected: true },
         { value: 'True', expected: true },

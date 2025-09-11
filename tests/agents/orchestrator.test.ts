@@ -489,6 +489,311 @@ describe('agents/orchestrator', () => {
     });
   });
 
+  describe('Message format conversion', () => {
+    beforeEach(() => {
+      vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+      mockMCPClientManager.createClients.mockResolvedValue([]);
+      mockMCPClientManager.getClients.mockReturnValue([]);
+      mockMCPClientManager.hasConnectedClients.mockReturnValue(false);
+      
+      orchestrator = new AgentOrchestrator(mockConfig);
+    });
+
+    it('processes simple string messages correctly', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Hello response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { role: 'user', content: 'Hello' },
+          { role: 'assistant', content: 'Hi there' }
+        ]
+      };
+
+      const response = await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Hello' }] },
+          { role: 'model', parts: [{ text: 'Hi there' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: 'You are a helpful AI assistant. Provide accurate, helpful, and concise responses.'
+        })
+      });
+    });
+
+    it('processes multi-modal content correctly', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Multi-modal response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { 
+            role: 'user', 
+            content: [
+              { type: 'text', text: 'Look at this: ' },
+              { type: 'text', text: 'amazing!' }
+            ] 
+          }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Look at this: amazing!' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: expect.any(String)
+        })
+      });
+    });
+
+    it('filters out system messages from contents and uses them as system instructions', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'System aware response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant' },
+          { role: 'user', content: 'Hello' },
+          { role: 'assistant', content: 'Hi' }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Hello' }] },
+          { role: 'model', parts: [{ text: 'Hi' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: 'You are a helpful assistant'
+        })
+      });
+    });
+
+    it('combines multiple system messages', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Multiple system response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'First instruction' },
+          { role: 'system', content: [{ type: 'text', text: 'Second instruction' }] },
+          { role: 'user', content: 'Hello' }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Hello' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: 'First instruction\n\nSecond instruction'
+        })
+      });
+    });
+
+    it('handles mixed content formats correctly', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Mixed format response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { role: 'user', content: 'Simple string' },
+          { 
+            role: 'assistant', 
+            content: [{ type: 'text', text: 'Multi-modal response' }] 
+          }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Simple string' }] },
+          { role: 'model', parts: [{ text: 'Multi-modal response' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: expect.any(String)
+        })
+      });
+    });
+
+    it('ignores image_url parts in multi-modal content', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Text only response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { 
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Text content' },
+              { type: 'image_url', image_url: { url: 'https://example.com/image.jpg' } },
+              { type: 'text', text: ' more text' }
+            ]
+          }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Text content more text' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: expect.any(String)
+        })
+      });
+    });
+
+    it('handles the original failing Obsidian multi-modal format', async () => {
+      const mockResponse = {
+        candidates: [{
+          content: {
+            parts: [{ text: 'Obsidian response' }]
+          }
+        }]
+      };
+      mockGenerateContent.mockResolvedValue(mockResponse);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: [{ 
+              type: 'text', 
+              text: 'You are Obsidian Copilot, a helpful assistant that integrates AI to Obsidian note-taking.'
+            }]
+          },
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'hello\n\n' }]
+          }
+        ]
+      };
+
+      await orchestrator.processRequest(request);
+
+      expect(mockGenerateContent).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'hello\n\n' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: 'You are Obsidian Copilot, a helpful assistant that integrates AI to Obsidian note-taking.'
+        })
+      });
+    });
+  });
+
+  describe('Streaming message conversion', () => {
+    beforeEach(() => {
+      vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+      mockMCPClientManager.createClients.mockResolvedValue([]);
+      mockMCPClientManager.getClients.mockReturnValue([]);
+      mockMCPClientManager.hasConnectedClients.mockReturnValue(false);
+      
+      orchestrator = new AgentOrchestrator(mockConfig);
+    });
+
+    it('processes streaming requests with correct message format', async () => {
+      const mockStreamChunks = [
+        {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Streaming response chunk' }]
+            }
+          }]
+        }
+      ];
+      mockGenerateContentStream.mockResolvedValue(mockStreamChunks);
+
+      const request: OpenAIRequest = {
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are streaming assistant' },
+          { role: 'user', content: 'Stream to me' }
+        ],
+        stream: true
+      };
+
+      const responseGenerator = orchestrator.processStreamingRequest(request);
+      const chunks = [];
+      for await (const chunk of responseGenerator) {
+        chunks.push(chunk);
+      }
+
+      expect(mockGenerateContentStream).toHaveBeenCalledWith({
+        model: 'gemini-2.0-flash-exp',
+        contents: [
+          { role: 'user', parts: [{ text: 'Stream to me' }] }
+        ],
+        config: expect.objectContaining({
+          systemInstruction: 'You are streaming assistant'
+        })
+      });
+    });
+  });
+
   afterEach(async () => {
     // Clean up orchestrator if it exists
     if (orchestrator && orchestrator.shutdown) {

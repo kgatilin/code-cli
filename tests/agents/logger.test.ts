@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { getLogger, initializeLogger, logInfo, logError, logWarning, logDebug } from '../src/agents/logger.js';
+import { getLogger, initializeLogger, logInfo, logError, logWarning, logDebug } from '../../src/agents/logger.js';
 
 describe('Logger', () => {
   let tempLogFile: string;
