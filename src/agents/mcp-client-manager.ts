@@ -87,10 +87,12 @@ export class MCPClientManager {
       return null;
     }
 
-    logDebug('MCPClientManager', 'Connecting to MCP server', { 
-      serverName, 
-      command: serverConfig.command, 
-      args: serverConfig.args 
+    // Log full server configuration for diagnostic purposes
+    logInfo('MCPClientManager', 'Connecting with configuration', {
+      serverName,
+      command: serverConfig.command,
+      args: serverConfig.args,
+      // For filesystem server, args typically include allowed directories
     });
 
     try {

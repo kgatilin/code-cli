@@ -2,6 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AgentConfig, OpenAIRequest, MCPConfig } from '../../src/types.js';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
+// Mock logger - needs to be declared before use in vi.mock
+const mockLogDebug = vi.fn();
+const mockLogInfo = vi.fn();
+const mockLogWarning = vi.fn();
+const mockLogError = vi.fn();
+
 // Mock Google GenAI SDK
 const mockGenerateContent = vi.fn();
 const mockGenerateContentStream = vi.fn();
@@ -19,11 +25,18 @@ vi.mock('@google/genai', () => ({
     const clients = args.slice(0, -1) as Client[];
     const config = args[args.length - 1];
     
-    // Return appropriate tool structure - single tool for all clients
+    // Return proper CallableTool structure
     return {
-      type: 'function',
-      name: 'mcp_aggregated_tool',
-      description: `MCP tool for ${clients.length} client(s)`
+      async tool() {
+        return {
+          type: 'function',
+          name: 'mcp_aggregated_tool',
+          description: `MCP tool for ${clients.length} client(s)`
+        };
+      },
+      async callTool(functionCalls) {
+        return [{ content: [{ type: 'text', text: 'Mock tool result' }] }];
+      }
     };
   })
 }));
@@ -58,6 +71,7 @@ vi.mock('../../src/agents/logger.js', () => ({
 import { AgentOrchestrator } from '../../src/agents/orchestrator.js';
 import { mcpToTool } from '@google/genai';
 import { loadMCPConfig } from '../../src/agents/mcp-config.js';
+import { logDebug, logInfo, logWarning, logError } from '../../src/agents/logger.js';
 
 describe('agents/orchestrator', () => {
   let orchestrator: AgentOrchestrator;
@@ -162,9 +176,8 @@ describe('agents/orchestrator', () => {
         config: expect.objectContaining({
           tools: expect.arrayContaining([
             expect.objectContaining({
-              type: 'function',
-              name: 'mcp_aggregated_tool',
-              description: 'MCP tool for 1 client(s)'
+              tool: expect.any(Function),
+              callTool: expect.any(Function)
             })
           ]),
           systemInstruction: expect.any(String),
@@ -274,9 +287,8 @@ describe('agents/orchestrator', () => {
           config: expect.objectContaining({
             tools: expect.arrayContaining([
               expect.objectContaining({
-                type: 'function',
-                name: 'mcp_aggregated_tool',
-                description: 'MCP tool for 2 client(s)'
+                tool: expect.any(Function),
+                callTool: expect.any(Function)
               })
             ])
           })
@@ -343,9 +355,8 @@ describe('agents/orchestrator', () => {
         config: expect.objectContaining({
           tools: expect.arrayContaining([
             expect.objectContaining({
-              type: 'function',
-              name: 'mcp_aggregated_tool',
-              description: 'MCP tool for 1 client(s)'
+              tool: expect.any(Function),
+              callTool: expect.any(Function)
             })
           ])
         })
@@ -791,6 +802,635 @@ describe('agents/orchestrator', () => {
           systemInstruction: 'You are streaming assistant'
         })
       });
+    });
+  });
+
+  describe('Phase 1 - Diagnostic Logging', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Reset specific logger mocks
+      vi.mocked(logDebug).mockClear();
+      vi.mocked(logInfo).mockClear();
+      vi.mocked(logWarning).mockClear();
+      vi.mocked(logError).mockClear();
+      
+      vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+      mockMCPClientManager.createClients.mockResolvedValue([]);
+      mockMCPClientManager.getClients.mockReturnValue([]);
+      mockMCPClientManager.hasConnectedClients.mockReturnValue(false);
+      mockMCPClientManager.isManagerShutdown.mockReturnValue(false);
+    });
+
+    describe('Tool Call Logging', () => {
+      it('should log tool definitions when tools are directly invoked', async () => {
+        // Setup MCP config with filesystem server
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        mockMCPClientManager.hasConnectedClients.mockReturnValue(true);
+        
+        // Reset and configure the mcpToTool mock for this test
+        vi.mocked(mcpToTool).mockReset();
+        vi.mocked(mcpToTool).mockReturnValue({
+          async tool() {
+            return {
+              type: 'function',
+              name: 'mcp_aggregated_tool',
+              description: 'MCP tool for 1 client(s)'
+            };
+          },
+          async callTool() {
+            return [{ content: [{ type: 'text', text: 'Mock tool result' }] }];
+          }
+        });
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Wait for MCP initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 0));
+        
+        // Get the wrapped tools directly and invoke them
+        const tools = await (orchestrator as any).buildMCPTools();
+        expect(tools.length).toBeGreaterThan(0);
+        const wrappedTool = tools[0];
+        
+        // Call tool.tool() method directly to trigger logging
+        await wrappedTool.tool();
+
+        // Verify tool definition logging happens
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'MCP Tool', 
+          'Tool definition requested',
+          expect.objectContaining({
+            tool: expect.objectContaining({
+              type: 'function',
+              name: 'mcp_aggregated_tool'
+            })
+          })
+        );
+      });
+
+      it('should log tool call initiation and completion when directly invoked', async () => {
+        // Setup to trigger tool calls
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        mockMCPClientManager.hasConnectedClients.mockReturnValue(true);
+        
+        // Reset and configure the mcpToTool mock for this test
+        vi.mocked(mcpToTool).mockReset();
+        vi.mocked(mcpToTool).mockReturnValue({
+          async tool() {
+            return {
+              type: 'function',
+              name: 'mcp_aggregated_tool',
+              description: 'MCP tool for 1 client(s)'
+            };
+          },
+          async callTool() {
+            return [{ content: [{ type: 'text', text: 'Mock tool result' }] }];
+          }
+        });
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Wait for MCP initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 0));
+        
+        // Get the wrapped tools directly and invoke them
+        const tools = await (orchestrator as any).buildMCPTools();
+        expect(tools.length).toBeGreaterThan(0);
+        const wrappedTool = tools[0];
+        
+        // Call tool.callTool() method directly to trigger logging
+        await wrappedTool.callTool([{ name: 'test_tool', arguments: {} }]);
+        
+        // Tool call logging should occur
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call initiated',
+          { calls: [{ name: 'test_tool', arguments: {} }] }
+        );
+        
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call completed',
+          expect.objectContaining({
+            result: expect.any(Array),
+            duration: expect.any(Number)
+          })
+        );
+      });
+
+      it('should log tool call failures with context when directly invoked', async () => {
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        
+        // Mock mcpToTool to return a tool that fails when called
+        const toolError = new Error('Tool call failed');
+        const mockTool = {
+          async tool() {
+            return {
+              type: 'function',
+              name: 'failing_tool',
+              description: 'Tool that fails'
+            };
+          },
+          async callTool() {
+            throw toolError;
+          }
+        };
+        vi.mocked(mcpToTool).mockReturnValue(mockTool);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Wait for MCP initialization to complete
+        await new Promise(resolve => setTimeout(resolve, 0));
+        
+        // Get the wrapped tools and invoke them directly
+        const tools = await (orchestrator as any).buildMCPTools();
+        expect(tools.length).toBeGreaterThan(0);
+        const wrappedTool = tools[0];
+        
+        try {
+          await wrappedTool.callTool([{ name: 'failing_tool', arguments: {} }]);
+        } catch (error) {
+          // Expected to fail
+        }
+        
+        // Should log the tool call error
+        expect(vi.mocked(logError)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call failed',
+          expect.objectContaining({
+            error: toolError,
+            calls: [{ name: 'failing_tool', arguments: {} }]
+          })
+        );
+      });
+    });
+
+    describe('Enhanced Error Context', () => {
+      it('should log request initiation with request ID and context', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const mockResponse = {
+          candidates: [{
+            content: { parts: [{ text: 'Test response' }] }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [
+            { role: 'system', content: 'You are helpful' },
+            { role: 'user', content: 'Hello' }
+          ]
+        };
+
+        await orchestrator.processRequest(request);
+        
+        // Should log request start with context
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'Orchestrator',
+          'Starting request',
+          expect.objectContaining({
+            requestId: expect.stringMatching(/^req-\d+-\d+$/),
+            messageCount: 2,
+            hasTools: false
+          })
+        );
+      });
+
+      it('should log request completion with request ID', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const mockResponse = {
+          candidates: [{
+            content: { parts: [{ text: 'Test response' }] }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Hello' }]
+        };
+
+        const response = await orchestrator.processRequest(request);
+        
+        // Should log request completion
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'Orchestrator',
+          'Request completed',
+          expect.objectContaining({
+            requestId: expect.stringMatching(/^req-\d+-\d+$/),
+            response: mockResponse
+          })
+        );
+      });
+
+      it('should log request failures with full context', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const testError = new Error('Test generation error');
+        mockGenerateContent.mockRejectedValue(testError);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'This will fail' }]
+        };
+
+        await expect(orchestrator.processRequest(request)).rejects.toThrow('Test generation error');
+        
+        // Should log error with full context
+        expect(vi.mocked(logError)).toHaveBeenCalledWith(
+          'Orchestrator',
+          'Request failed',
+          expect.objectContaining({
+            requestId: expect.stringMatching(/^req-\d+-\d+$/),
+            error: testError,
+            request: expect.objectContaining({
+              messages: request.messages,
+              tools: 0
+            })
+          })
+        );
+      });
+
+      it('should log streaming request context', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const mockStreamChunks = [
+          {
+            candidates: [{
+              content: { parts: [{ text: 'Streaming response' }] }
+            }]
+          }
+        ];
+        mockGenerateContentStream.mockResolvedValue(mockStreamChunks);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Stream to me' }],
+          stream: true
+        };
+
+        const responseGenerator = orchestrator.processStreamingRequest(request);
+        const chunks = [];
+        for await (const chunk of responseGenerator) {
+          chunks.push(chunk);
+        }
+        
+        // Should log streaming request start
+        expect(vi.mocked(logDebug)).toHaveBeenCalledWith(
+          'Orchestrator',
+          'Starting request',
+          expect.objectContaining({
+            requestId: expect.stringMatching(/^req-\d+-\d+$/),
+            messageCount: 1,
+            hasTools: false
+          })
+        );
+      });
+    });
+
+    describe('Request ID Generation', () => {
+      it('should generate unique request IDs for concurrent requests', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const mockResponse = {
+          candidates: [{
+            content: { parts: [{ text: 'Test response' }] }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Test request' }]
+        };
+
+        // Make concurrent requests - they should have different counter values
+        const promises = [
+          orchestrator.processRequest(request),
+          orchestrator.processRequest(request)
+        ];
+        
+        await Promise.all(promises);
+        
+        // Get all request IDs from log calls
+        const startRequestCalls = vi.mocked(logDebug).mock.calls.filter(
+          call => call[1] === 'Starting request'
+        );
+        
+        expect(startRequestCalls.length).toBeGreaterThanOrEqual(2);
+        
+        const requestIds = startRequestCalls.map(call => call[2].requestId);
+        expect(requestIds[0]).not.toBe(requestIds[1]); // Should be unique
+      });
+
+      it('should use consistent request ID throughout request lifecycle', async () => {
+        vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        const mockResponse = {
+          candidates: [{
+            content: { parts: [{ text: 'Test response' }] }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        const request: OpenAIRequest = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Test request' }]
+        };
+
+        await orchestrator.processRequest(request);
+        
+        // Find the request ID from start log
+        const startCall = vi.mocked(logDebug).mock.calls.find(
+          call => call[1] === 'Starting request'
+        );
+        const requestId = startCall![2].requestId;
+        
+        // Verify completion log uses same request ID
+        const completionCall = vi.mocked(logDebug).mock.calls.find(
+          call => call[1] === 'Request completed'
+        );
+        expect(completionCall![2].requestId).toBe(requestId);
+      });
+    });
+  });
+
+  describe('Phase 2 - Targeted Solutions', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Reset specific logger mocks
+      vi.mocked(logDebug).mockClear();
+      vi.mocked(logInfo).mockClear();
+      vi.mocked(logWarning).mockClear();
+      vi.mocked(logError).mockClear();
+      
+      vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+      mockMCPClientManager.createClients.mockResolvedValue([]);
+      mockMCPClientManager.getClients.mockReturnValue([]);
+      mockMCPClientManager.hasConnectedClients.mockReturnValue(false);
+      mockMCPClientManager.isManagerShutdown.mockReturnValue(false);
+    });
+
+    describe('Enhanced Error Messaging', () => {
+      it('should provide detailed error context for filesystem tool failures', async () => {
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/allowed/path'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        mockMCPClientManager.hasConnectedClients.mockReturnValue(true);
+        
+        // Mock filesystem tool that will fail with path error
+        const mockTool = {
+          tool: vi.fn().mockResolvedValue({
+            type: 'function',
+            name: 'filesystem_tool',
+            description: 'Filesystem operations'
+          }),
+          callTool: vi.fn().mockRejectedValue(new Error('Access denied: /invalid/path'))
+        };
+        
+        vi.mocked(mcpToTool).mockReturnValue(mockTool);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Trigger the wrapped tool call by calling it directly to test the wrapper
+        const tools = await (orchestrator as any).buildMCPTools();
+        const wrappedTool = tools[0];
+        
+        try {
+          await wrappedTool.callTool([{ name: 'read_file', arguments: { path: '/invalid/path' } }]);
+        } catch (error) {
+          // Expected to fail
+        }
+        
+        // Verify enhanced error logging occurred
+        expect(vi.mocked(logError)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call failed',
+          expect.objectContaining({
+            error: expect.objectContaining({
+              message: 'Access denied: /invalid/path'
+            }),
+            calls: expect.any(Array),
+            enhancedContext: expect.objectContaining({
+              toolName: 'read_file',
+              toolType: 'filesystem',
+              pathErrorContext: expect.any(Object)
+            })
+          })
+        );
+      });
+
+      it('should log exact text mismatch for edit_file operations', async () => {
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        
+        // Mock edit_file tool that fails due to text mismatch
+        const mockTool = {
+          tool: vi.fn().mockResolvedValue({
+            type: 'function',
+            name: 'edit_file',
+            description: 'Edit file content'
+          }),
+          callTool: vi.fn().mockRejectedValue(new Error('Text not found in file'))
+        };
+        
+        vi.mocked(mcpToTool).mockReturnValue(mockTool);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Trigger the wrapped tool call directly
+        const tools = await (orchestrator as any).buildMCPTools();
+        const wrappedTool = tools[0];
+        
+        try {
+          await wrappedTool.callTool([{ name: 'edit_file', arguments: { path: 'test.txt', old_text: 'wrong text' } }]);
+        } catch (error) {
+          // Expected to fail
+        }
+        
+        // Verify text mismatch error context is logged
+        expect(vi.mocked(logError)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call failed',
+          expect.objectContaining({
+            error: expect.objectContaining({
+              message: 'Text not found in file'
+            }),
+            enhancedContext: expect.objectContaining({
+              toolName: 'edit_file',
+              suggestion: expect.stringContaining('exact text match')
+            })
+          })
+        );
+      });
+    });
+
+    describe('Timeout Detection', () => {
+      it('should detect and log tool call timeouts', async () => {
+        // Use fake timers before creating orchestrator
+        vi.useFakeTimers();
+        
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        
+        // Mock tool that never resolves
+        const mockTool = {
+          tool: vi.fn().mockResolvedValue({
+            type: 'function',
+            name: 'slow_tool',
+            description: 'Slow operation'
+          }),
+          callTool: vi.fn().mockImplementation(() => new Promise(() => {})) // Never resolves
+        };
+        
+        vi.mocked(mcpToTool).mockReturnValue(mockTool);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Trigger the wrapped tool call directly
+        const tools = await (orchestrator as any).buildMCPTools();
+        const wrappedTool = tools[0];
+        
+        const promise = wrappedTool.callTool([{ name: 'slow_tool', arguments: {} }]);
+        
+        // Fast forward time to trigger timeout
+        vi.advanceTimersByTime(30000);
+        
+        try {
+          await promise;
+        } catch (error) {
+          // Expected to timeout
+        }
+        
+        // Verify timeout warning is logged
+        expect(vi.mocked(logWarning)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call exceeded timeout, continuing without result',
+          expect.objectContaining({
+            toolName: 'slow_tool',
+            timeoutDuration: 30000
+          })
+        );
+        
+        vi.useRealTimers();
+      }, 5000); // 5 second test timeout
+
+      it('should continue processing after timeout without blocking', async () => {
+        vi.useFakeTimers();
+        
+        const mcpConfig = {
+          mcpServers: {
+            filesystem: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem'] }
+          }
+        };
+        vi.mocked(loadMCPConfig).mockResolvedValue(mcpConfig);
+        
+        const mockClient = { name: 'filesystem-client' } as Client;
+        mockMCPClientManager.createClients.mockResolvedValue([mockClient]);
+        mockMCPClientManager.getClients.mockReturnValue([mockClient]);
+        
+        // Mock tool that hangs indefinitely
+        const mockTool = {
+          tool: vi.fn().mockResolvedValue({
+            type: 'function',
+            name: 'hanging_tool',
+            description: 'Tool that hangs'
+          }),
+          callTool: vi.fn().mockImplementation(() => new Promise(() => {})) // Never resolves
+        };
+        
+        vi.mocked(mcpToTool).mockReturnValue(mockTool);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Test timeout behavior directly
+        const tools = await (orchestrator as any).buildMCPTools();
+        const wrappedTool = tools[0];
+        
+        const promise = wrappedTool.callTool([{ name: 'hanging_tool', arguments: {} }]);
+        
+        // Fast forward time to trigger timeout
+        vi.advanceTimersByTime(30001);
+        
+        try {
+          await promise;
+        } catch (error) {
+          // Expected to timeout
+          expect(error).toBeInstanceOf(Error);
+          expect((error as Error).message).toBe('Tool call timeout');
+        }
+        
+        // Verify timeout was logged
+        expect(vi.mocked(logWarning)).toHaveBeenCalledWith(
+          'MCP Tool',
+          'Tool call exceeded timeout, continuing without result',
+          expect.objectContaining({
+            toolName: 'hanging_tool',
+            timeoutDuration: 30000
+          })
+        );
+        
+        vi.useRealTimers();
+      }, 3000); // 3 second test timeout
     });
   });
 

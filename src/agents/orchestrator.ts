@@ -1,5 +1,5 @@
 import { GoogleGenAI, mcpToTool } from '@google/genai';
-import type { CallableTool, GenerationConfig } from '@google/genai';
+import type { CallableTool, GenerationConfig, FunctionCall } from '@google/genai';
 import type { 
   OpenAIRequest, 
   OpenAIResponse, 
@@ -11,6 +11,7 @@ import type {
 import { logDebug, logInfo, logError, logWarning } from './logger.js';
 import { MCPClientManager } from './mcp-client-manager.js';
 import { loadMCPConfig } from './mcp-config.js';
+import { FilesystemHelper } from './filesystem-helper.js';
 
 /**
  * Agent orchestrator for LLM interactions using Google Vertex AI
@@ -21,6 +22,8 @@ export class AgentOrchestrator {
   private model: string;
   private mcpClientManager?: MCPClientManager;
   private mcpInitializationPromise?: Promise<void>;
+  private filesystemHelper: FilesystemHelper;
+  private requestCounter: number = 0;
 
   constructor(private config: AgentConfig) {
     // Initialize Google Generative AI client
@@ -30,6 +33,9 @@ export class AgentOrchestrator {
       location: config.VERTEX_AI_LOCATION,
     });
     this.model = config.VERTEX_AI_MODEL;
+    
+    // Initialize filesystem helper for enhanced error messaging
+    this.filesystemHelper = new FilesystemHelper();
     
     logInfo('Orchestrator', 'Initialized with Google AI client', {
       project: config.VERTEX_AI_PROJECT,
@@ -74,6 +80,144 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Wraps CallableTool with logging, timeout detection, and enhanced error messaging
+   */
+  private wrapToolForLogging = (tool: CallableTool): CallableTool => {
+    return {
+      async tool() {
+        const toolDef = await tool.tool();
+        logDebug('MCP Tool', 'Tool definition requested', { tool: toolDef });
+        return toolDef;
+      },
+      callTool: async (functionCalls: FunctionCall[]) => {
+        const startTime = Date.now();
+        const timeoutMs = 30000; // 30 second timeout
+        
+        logDebug('MCP Tool', 'Tool call initiated', { calls: functionCalls });
+        
+        try {
+          // Race between tool call and timeout
+          const result = await Promise.race([
+            tool.callTool(functionCalls),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('Tool call timeout')), timeoutMs)
+            )
+          ]);
+          
+          const duration = Date.now() - startTime;
+          logDebug('MCP Tool', 'Tool call completed', { result, duration });
+          
+          // Log if call took longer than expected but didn't timeout
+          if (duration > timeoutMs * 0.8) {
+            logWarning('MCP Tool', 'Tool call slow performance detected', {
+              duration,
+              threshold: timeoutMs * 0.8,
+              toolName: this.extractToolName(functionCalls)
+            });
+          }
+          
+          return result;
+        } catch (error) {
+          const duration = Date.now() - startTime;
+          
+          // Enhanced error context generation
+          const enhancedContext = this.generateEnhancedErrorContext(error, functionCalls, duration, timeoutMs);
+          
+          // Log timeout separately
+          if (error instanceof Error && error.message === 'Tool call timeout') {
+            logWarning('MCP Tool', 'Tool call exceeded timeout, continuing without result', {
+              toolName: this.extractToolName(functionCalls),
+              timeoutDuration: timeoutMs,
+              actualDuration: duration
+            });
+            
+            // For timeout, we could return empty result or rethrow based on strategy
+            throw error;
+          }
+          
+          logError('MCP Tool', 'Tool call failed', { 
+            error, 
+            calls: functionCalls,
+            duration,
+            enhancedContext
+          });
+          throw error;
+        }
+      }
+    };
+  };
+
+  /**
+   * Extract tool name from function calls for logging
+   */
+  private extractToolName(functionCalls: FunctionCall[]): string {
+    const firstCall = functionCalls[0] as { name?: string } | undefined;
+    if (firstCall?.name) {
+      return firstCall.name;
+    }
+    return 'unknown_tool';
+  }
+
+  /**
+   * Generate enhanced error context for better debugging
+   */
+  private generateEnhancedErrorContext(
+    error: unknown, 
+    functionCalls: FunctionCall[], 
+    duration: number, 
+    timeoutMs: number
+  ): Record<string, unknown> {
+    const context: Record<string, unknown> = {
+      duration,
+      timeoutThreshold: timeoutMs
+    };
+    
+    const toolName = this.extractToolName(functionCalls);
+    context.toolName = toolName;
+    
+    if (error instanceof Error) {
+      // Detect filesystem tool errors
+      if (toolName.includes('filesystem') || toolName.includes('file') || toolName.includes('directory')) {
+        context.toolType = 'filesystem';
+        
+        // Extract path from function calls for filesystem error context
+        const primaryPath = this.extractPathFromArgs(functionCalls);
+        if (primaryPath) {
+          // Generate path error context (assuming common base paths)
+          const basePath = process.cwd(); // Default to current working directory
+          const allowedDirs = [basePath]; // In real scenarios, this would come from MCP config
+          context.pathErrorContext = this.filesystemHelper.getPathErrorContext(primaryPath, basePath, allowedDirs);
+        }
+      }
+      
+      // Detect edit_file specific errors
+      if (toolName === 'edit_file' && error.message.toLowerCase().includes('text not found')) {
+        context.suggestion = 'Ensure exact text match including whitespace and line endings. Consider reading the file first to verify content.';
+      }
+      
+      // Timeout-specific context
+      if (duration >= timeoutMs * 0.9) {
+        context.timeoutRelated = true;
+        context.suggestion = 'Tool call may be hanging or processing large amounts of data. Consider breaking down the operation.';
+      }
+    }
+    
+    return context;
+  }
+
+  /**
+   * Extract path argument from function calls
+   */
+  private extractPathFromArgs(functionCalls: FunctionCall[]): string | null {
+    if (functionCalls.length === 0) return null;
+    
+    const firstCall = functionCalls[0] as { arguments?: Record<string, unknown>; args?: Record<string, unknown> } | undefined;
+    const args = firstCall?.arguments || firstCall?.args || {};
+    
+    return this.filesystemHelper.extractPrimaryPath(args);
+  }
+
+  /**
    * Build MCP tools from connected clients
    */
   private async buildMCPTools(): Promise<CallableTool[]> {
@@ -93,8 +237,11 @@ export class AgentOrchestrator {
       // FIX: Pass all clients at once to mcpToTool
       const tool = mcpToTool(...clients, {});
       
+      // Wrap tool with logging for diagnostic purposes
+      const wrappedTool = this.wrapToolForLogging(tool);
+      
       // mcpToTool always returns a single CallableTool, wrap in array
-      const tools = [tool];
+      const tools = [wrappedTool];
       
       logDebug('Orchestrator', 'Built MCP tools successfully', { toolCount: tools.length });
       return tools;
@@ -110,9 +257,13 @@ export class AgentOrchestrator {
    * Process OpenAI request and return OpenAI-compatible response
    */
   async processRequest(request: OpenAIRequest): Promise<OpenAIResponse> {
-    logDebug('Orchestrator', 'Processing non-streaming request', {
+    // Generate unique request ID for tracing
+    const requestId = `req-${Date.now()}-${++this.requestCounter}`;
+    
+    logDebug('Orchestrator', 'Starting request', {
+      requestId,
       messageCount: request.messages?.length || 0,
-      model: request.model || this.model
+      hasTools: false // Will be updated when tools are built
     });
 
     try {
@@ -121,12 +272,20 @@ export class AgentOrchestrator {
       const systemInstructions = this.buildSystemInstructions(request);
 
       logDebug('Orchestrator', 'Converted messages to Google AI format', {
+        requestId,
         contents: contents,
         systemInstructions: systemInstructions
       });
 
       // Build MCP tools if available
       const tools = await this.buildMCPTools();
+      
+      // Update hasTools flag for logging
+      logDebug('Orchestrator', 'Starting request', {
+        requestId,
+        messageCount: request.messages?.length || 0,
+        hasTools: tools.length > 0
+      });
       
       // Generate response using Google AI
       const config = {
@@ -140,7 +299,10 @@ export class AgentOrchestrator {
       // Add tools if available
       if (tools.length > 0) {
         config.tools = tools;
-        logDebug('Orchestrator', 'Including MCP tools in request', { toolCount: tools.length });
+        logDebug('Orchestrator', 'Including MCP tools in request', { 
+          requestId,
+          toolCount: tools.length 
+        });
       }
 
       const response = await this.genai.models.generateContent({
@@ -149,18 +311,26 @@ export class AgentOrchestrator {
         config,
       });
 
+      logDebug('Orchestrator', 'Request completed', { requestId, response });
+
       // Convert response back to OpenAI format
       const openAIResponse = this.formatResponse(response, request);
       
       logInfo('Orchestrator', 'Non-streaming request completed', {
+        requestId,
         responseId: openAIResponse.id,
         contentLength: openAIResponse.choices[0]?.message?.content?.length || 0
       });
 
       return openAIResponse;
     } catch (error) {
-      logError('Orchestrator', 'Error processing request', { 
-        error: error instanceof Error ? error.message : String(error) 
+      logError('Orchestrator', 'Request failed', { 
+        requestId,
+        error,
+        request: { 
+          messages: request.messages, 
+          tools: (await this.buildMCPTools()).length 
+        }
       });
       throw error;
     }
@@ -170,9 +340,13 @@ export class AgentOrchestrator {
    * Process OpenAI streaming request and return streaming chunks
    */
   async* processStreamingRequest(request: OpenAIRequest): AsyncIterable<OpenAIStreamChunk> {
-    logDebug('Orchestrator', 'Processing streaming request', {
+    // Generate unique request ID for tracing
+    const requestId = `req-${Date.now()}-${++this.requestCounter}`;
+    
+    logDebug('Orchestrator', 'Starting request', {
+      requestId,
       messageCount: request.messages?.length || 0,
-      model: request.model || this.model
+      hasTools: false // Will be updated when tools are built
     });
 
     try {
@@ -181,12 +355,20 @@ export class AgentOrchestrator {
       const systemInstructions = this.buildSystemInstructions(request);
 
       logDebug('Orchestrator', 'Converted messages to Google AI format', {
+        requestId,
         contents: contents,
         systemInstructions: systemInstructions
       });
 
       // Build MCP tools if available
       const tools = await this.buildMCPTools();
+      
+      // Update hasTools flag for logging
+      logDebug('Orchestrator', 'Starting request', {
+        requestId,
+        messageCount: request.messages?.length || 0,
+        hasTools: tools.length > 0
+      });
       
       // Generate streaming response using Google AI
       const config = {
@@ -203,7 +385,10 @@ export class AgentOrchestrator {
       // Add tools if available
       if (tools.length > 0) {
         config.tools = tools;
-        logDebug('Orchestrator', 'Including MCP tools in streaming request', { toolCount: tools.length });
+        logDebug('Orchestrator', 'Including MCP tools in streaming request', { 
+          requestId,
+          toolCount: tools.length 
+        });
       }
 
       const stream = await this.genai.models.generateContentStream({
@@ -216,11 +401,14 @@ export class AgentOrchestrator {
       const created = Math.floor(Date.now() / 1000);
       let isFirstChunk = true;
 
+      logDebug('Orchestrator', 'Streaming response initiated', { requestId, chatId });
+
       // Yield streaming chunks in OpenAI format
       for await (const chunk of stream) {
         const candidates = chunk.candidates || [];
         const candidate = candidates[0];
         
+        logDebug('Orchestrator', 'Received streaming chunk', { requestId, chunk });
         if (candidate?.content?.parts) {
           for (const part of candidate.content.parts) {
             if (part.text) {
@@ -270,10 +458,15 @@ export class AgentOrchestrator {
         }]
       };
 
-      logInfo('Orchestrator', 'Streaming request completed', { responseId: chatId });
+      logInfo('Orchestrator', 'Streaming request completed', { requestId, responseId: chatId });
     } catch (error) {
-      logError('Orchestrator', 'Error processing streaming request', { 
-        error: error instanceof Error ? error.message : String(error) 
+      logError('Orchestrator', 'Request failed', { 
+        requestId,
+        error,
+        request: { 
+          messages: request.messages, 
+          tools: (await this.buildMCPTools()).length 
+        }
       });
       throw error;
     }

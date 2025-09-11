@@ -3,6 +3,8 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { MCPConfig } from '../../src/types.js';
 
+// Mock the logger module
+
 // Mock the MCP SDK modules
 const mockClient = {
   connect: vi.fn(),
@@ -34,6 +36,7 @@ vi.mock('../../src/agents/logger.js', () => ({
 import { MCPClientManager } from '../../src/agents/mcp-client-manager.js';
 import { Client as ClientConstructor } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport as TransportConstructor } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { logDebug, logInfo, logWarning, logError } from '../../src/agents/logger.js';
 
 describe('agents/mcp-client-manager', () => {
   let clientManager: MCPClientManager;
@@ -500,6 +503,281 @@ describe('agents/mcp-client-manager', () => {
       expect(clients).toHaveLength(2);
       expect(clientManager.getClient('outlook-mcp')).toBeDefined();
       expect(clientManager.getClient('filesystem')).toBeDefined();
+    });
+  });
+
+  describe('Phase 1 - MCP Server Configuration Logging', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Reset specific logger mocks
+      vi.mocked(logDebug).mockClear();
+      vi.mocked(logInfo).mockClear();
+      vi.mocked(logWarning).mockClear();
+      vi.mocked(logError).mockClear();
+      
+      clientManager = new MCPClientManager();
+    });
+
+    describe('Server Configuration Logging', () => {
+      it('should log full server configuration during connection', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            filesystem: {
+              command: 'npx',
+              args: ['-y', '@modelcontextprotocol/server-filesystem', '/path/to/files']
+            }
+          }
+        };
+
+        mockClient.connect.mockResolvedValue(undefined);
+        
+        await clientManager.createClients(config);
+        
+        // Should log detailed configuration
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'filesystem',
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-filesystem', '/path/to/files']
+          }
+        );
+      });
+
+      it('should log configuration for multiple servers', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            filesystem: {
+              command: 'npx',
+              args: ['-y', '@modelcontextprotocol/server-filesystem', '/home/user/docs']
+            },
+            outlook: {
+              command: '/bin/outlook-mcp',
+              args: ['config.yaml', '.env']
+            }
+          }
+        };
+
+        mockClient.connect.mockResolvedValue(undefined);
+        
+        await clientManager.createClients(config);
+        
+        // Should log configuration for filesystem server
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'filesystem',
+            command: 'npx',
+            args: ['-y', '@modelcontextprotocol/server-filesystem', '/home/user/docs']
+          }
+        );
+        
+        // Should log configuration for outlook server
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'outlook',
+            command: '/bin/outlook-mcp',
+            args: ['config.yaml', '.env']
+          }
+        );
+      });
+
+      it('should log configuration with complex arguments', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            'complex-server': {
+              command: 'node',
+              args: [
+                'server.js',
+                '--port', '3000',
+                '--config', '/path/with spaces/config.json',
+                '--env', 'development'
+              ]
+            }
+          }
+        };
+
+        mockClient.connect.mockResolvedValue(undefined);
+        
+        await clientManager.createClients(config);
+        
+        // Should log full complex configuration
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'complex-server',
+            command: 'node',
+            args: [
+              'server.js',
+              '--port', '3000',
+              '--config', '/path/with spaces/config.json',
+              '--env', 'development'
+            ]
+          }
+        );
+      });
+
+      it('should log configuration with empty args', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            'simple-server': {
+              command: 'simple-mcp-server',
+              args: []
+            }
+          }
+        };
+
+        mockClient.connect.mockResolvedValue(undefined);
+        
+        await clientManager.createClients(config);
+        
+        // Should log configuration with empty args
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'simple-server',
+            command: 'simple-mcp-server',
+            args: []
+          }
+        );
+      });
+
+      it('should log configuration for servers that fail to connect', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            'failing-server': {
+              command: 'nonexistent-command',
+              args: ['arg1', 'arg2']
+            }
+          }
+        };
+
+        mockClient.connect.mockRejectedValue(new Error('Connection failed'));
+        
+        await clientManager.createClients(config);
+        
+        // Should still log configuration even if connection fails
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'failing-server',
+            command: 'nonexistent-command',
+            args: ['arg1', 'arg2']
+          }
+        );
+        
+        // Should also log the error
+        expect(vi.mocked(logError)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Failed to establish MCP server connection',
+          expect.objectContaining({
+            serverName: 'failing-server',
+            command: 'nonexistent-command',
+            error: 'Connection failed'
+          })
+        );
+      });
+
+      it('should log configuration from real-world filesystem example', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            filesystem: {
+              command: 'npx',
+              args: [
+                '-y',
+                '@modelcontextprotocol/server-filesystem',
+                '/Users/kgatilin/Documents/Obsidian/SmartNotes',
+                '/Users/kgatilin/PersonalProjects'
+              ]
+            }
+          }
+        };
+
+        mockClient.connect.mockResolvedValue(undefined);
+        
+        await clientManager.createClients(config);
+        
+        // Should log the real-world configuration
+        expect(vi.mocked(logInfo)).toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          {
+            serverName: 'filesystem',
+            command: 'npx',
+            args: [
+              '-y',
+              '@modelcontextprotocol/server-filesystem',
+              '/Users/kgatilin/Documents/Obsidian/SmartNotes',
+              '/Users/kgatilin/PersonalProjects'
+            ]
+          }
+        );
+      });
+
+      it('should not log configuration when manager is shutdown', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            filesystem: {
+              command: 'npx',
+              args: ['-y', '@modelcontextprotocol/server-filesystem']
+            }
+          }
+        };
+
+        await clientManager.shutdown();
+        
+        await clientManager.createClients(config);
+        
+        // Should not log configuration when shutdown
+        expect(vi.mocked(logInfo)).not.toHaveBeenCalledWith(
+          'MCPClientManager',
+          'Connecting with configuration',
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('Configuration Logging Integration', () => {
+      it('should log configuration before connection attempts', async () => {
+        const config: MCPConfig = {
+          mcpServers: {
+            filesystem: {
+              command: 'npx',
+              args: ['-y', '@modelcontextprotocol/server-filesystem']
+            }
+          }
+        };
+
+        // Track call order
+        const callOrder: string[] = [];
+        
+        vi.mocked(logInfo).mockImplementation((module, message) => {
+          callOrder.push(`${module}:${message}`);
+        });
+        
+        mockClient.connect.mockImplementation(async () => {
+          callOrder.push('connect');
+          return undefined;
+        });
+        
+        await clientManager.createClients(config);
+        
+        // Configuration logging should happen before connection
+        expect(callOrder).toEqual([
+          'MCPClientManager:Creating MCP clients',
+          'MCPClientManager:Connecting with configuration',
+          'connect',
+          'MCPClientManager:Successfully connected to MCP server',
+          'MCPClientManager:MCP client creation completed'
+        ]);
+      });
     });
   });
 });
