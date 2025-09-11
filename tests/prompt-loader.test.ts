@@ -1,13 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups 
+} from './utils/index.js';
 import { loadPrompt, replacePlaceholders, listAvailablePrompts, processIncludes } from '../src/prompt-loader.js';
 import type { PlaceholderContext, Config } from '../src/types.js';
 
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+
 describe('prompt-loader', () => {
-  const testDir = join(process.cwd(), 'test-prompts');
-  const promptsPath = join(testDir, '.claude', 'prompts');
-  const templatesPath = join(testDir, '.claude', 'templates');
+  let testDir: string;
+  let promptsPath: string;
+  let templatesPath: string;
 
   function createTestConfig(overrides?: Partial<Config>): Config {
     const snippetsPath = join(testDir, '.claude', 'snippets');
@@ -37,21 +45,28 @@ describe('prompt-loader', () => {
   }
 
   beforeEach(() => {
-    // Create test prompts directory
+    // Create safe test directory
+    testDir = testEnv.createSafeTestDir();
+    promptsPath = join(testDir, '.claude', 'prompts');
+    templatesPath = join(testDir, '.claude', 'templates');
+    
+    // Create test directory structure
     if (!existsSync(promptsPath)) {
       mkdirSync(promptsPath, { recursive: true });
     }
-    // Create test templates directory
     if (!existsSync(templatesPath)) {
       mkdirSync(templatesPath, { recursive: true });
     }
+    
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      testEnv.cleanupSafely(testDir);
+    });
   });
 
-  afterEach(() => {
-    // Clean up test directory
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+  afterEach(async () => {
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('loadPrompt', () => {

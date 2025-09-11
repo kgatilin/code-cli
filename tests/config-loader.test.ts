@@ -1,29 +1,51 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups 
+} from './utils/index.js';
 import { loadConfig, getDefaultConfig, mergeConfigs, validateConfig } from '../src/config-loader.js';
 import type { Config } from '../src/types.js';
 
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+
 describe('config-loader', () => {
-  const testDir = join(process.cwd(), 'test-config');
-  const testConfigPath = join(testDir, '.cc.yaml');
+  let testDir: string;
+  let testConfigPath: string;
+  let originalCwd: string;
 
   beforeEach(() => {
-    // Create test directory
+    // Store original working directory
+    originalCwd = process.cwd();
+    
+    // Create safe test directory
+    testDir = testEnv.createSafeTestDir();
+    testConfigPath = join(testDir, '.cc.yaml');
+    
+    // Create test directory structure
     if (!existsSync(testDir)) {
       mkdirSync(testDir, { recursive: true });
     }
+    
     // Change to test directory
     process.chdir(testDir);
+    
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      // Change back to original directory
+      process.chdir(originalCwd);
+      
+      // Clean up test files safely
+      testEnv.cleanupSafely(testDir);
+    });
   });
 
-  afterEach(() => {
-    // Change back to original directory
-    process.chdir(join(testDir, '..'));
-    // Clean up test directory
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+  afterEach(async () => {
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('getDefaultConfig', () => {

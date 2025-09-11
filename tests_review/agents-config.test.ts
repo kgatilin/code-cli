@@ -1,32 +1,53 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFileSync, unlinkSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { writeFileSync, unlinkSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups 
+} from './utils/index.js';
 
-// Mock the os module at the top level
-const testHomeDir = join(process.cwd(), 'test-home');
-vi.mock('os', () => ({
-  homedir: () => testHomeDir
-}));
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+let testHomeDir: string;
+
+// Mock the os module to use safe test directory
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    homedir: () => testHomeDir
+  };
+});
 
 // Import after mocking
 import { loadAgentConfig, getAgentConfigPath } from '../src/agents/config.js';
 
 describe('agents/config', () => {
-  const testCodeCliDir = join(testHomeDir, '.code-cli');
-  const testEnvFile = join(testCodeCliDir, '.env');
+  let testCodeCliDir: string;
+  let testEnvFile: string;
 
   beforeEach(() => {
+    // Create safe test directory
+    testHomeDir = testEnv.createSafeTestDir();
+    testCodeCliDir = join(testHomeDir, '.code-cli');
+    testEnvFile = join(testCodeCliDir, '.env');
+    
     // Create test directory structure
     if (!existsSync(testCodeCliDir)) {
       mkdirSync(testCodeCliDir, { recursive: true });
     }
+
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      // Clean up test files safely
+      testEnv.cleanupSafely(testHomeDir);
+    });
   });
 
-  afterEach(() => {
-    // Clean up test files
-    if (existsSync(testHomeDir)) {
-      rmSync(testHomeDir, { recursive: true, force: true });
-    }
+  afterEach(async () => {
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('getAgentConfigPath', () => {

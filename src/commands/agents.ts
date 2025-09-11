@@ -193,6 +193,30 @@ async function handleRestartAction(_options: AgentsOptions): Promise<CommandResu
 }
 
 /**
+ * Checks if we're running in a test environment
+ * @returns True if in test environment
+ */
+function isTestEnvironment(): boolean {
+  return process.env.NODE_ENV === 'test' || 
+         process.env.VITEST === 'true' ||
+         process.env.npm_lifecycle_event === 'test' ||
+         process.argv.some(arg => arg.includes('vitest') || arg.includes('test'));
+}
+
+/**
+ * Safe process exit that respects test environment
+ * @param code - Exit code
+ */
+function safeProcessExit(code: number): void {
+  if (isTestEnvironment()) {
+    // In test environment, throw error instead of exiting
+    throw new Error(`Process would exit with code ${code} (test environment)`);
+  } else {
+    process.exit(code);
+  }
+}
+
+/**
  * Special handler to run the server directly (used by spawned processes)
  * @param config - Agent configuration
  */
@@ -220,7 +244,7 @@ async function runServerDirectly(config: AgentConfig): Promise<void> {
     // Handle server errors
     server.on('error', (error) => {
       logError('ServerMain', 'Server error', { error: error.message, stack: error.stack });
-      process.exit(1);
+      safeProcessExit(1);
     });
     
     // Handle shutdown signals
@@ -228,7 +252,7 @@ async function runServerDirectly(config: AgentConfig): Promise<void> {
       logInfo('ServerMain', 'Received SIGTERM, shutting down gracefully...');
       server.close(() => {
         logInfo('ServerMain', 'Server shut down successfully');
-        process.exit(0);
+        safeProcessExit(0);
       });
     });
     
@@ -236,18 +260,18 @@ async function runServerDirectly(config: AgentConfig): Promise<void> {
       logInfo('ServerMain', 'Received SIGINT, shutting down gracefully...');
       server.close(() => {
         logInfo('ServerMain', 'Server shut down successfully');
-        process.exit(0);
+        safeProcessExit(0);
       });
     });
     
     process.on('uncaughtException', (error) => {
       logError('ServerMain', 'Uncaught exception', { error: error.message, stack: error.stack });
-      process.exit(1);
+      safeProcessExit(1);
     });
     
     process.on('unhandledRejection', (reason, promise) => {
       logError('ServerMain', 'Unhandled rejection', { reason: String(reason), promise: String(promise) });
-      process.exit(1);
+      safeProcessExit(1);
     });
     
     logInfo('ServerMain', 'Server initialization complete, ready to handle requests');
@@ -260,7 +284,7 @@ async function runServerDirectly(config: AgentConfig): Promise<void> {
       error: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined
     });
-    process.exit(1);
+    safeProcessExit(1);
   }
 }
 

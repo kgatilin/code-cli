@@ -193,8 +193,11 @@ export class AgentOrchestrator {
         systemInstruction: systemInstructions,
         temperature: request.temperature ?? 0.7,
         maxOutputTokens: request.max_tokens ?? 4096,
-        topK: 40,
         topP: 0.95,
+        thinkingConfig: {
+          thinkingBudget: 1024,
+          includeThoughts: true,
+        }
       } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
 
       // Add tools if available

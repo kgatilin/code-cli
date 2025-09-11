@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups 
+} from '../utils/index.js';
 import { executeList } from '../../src/commands/list.js';
 import type { Config } from '../../src/types.js';
 
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+
 describe('list command', () => {
-  const testDir = join(process.cwd(), 'test-list');
+  let testDir: string;
   const originalHome = process.env.HOME;
 
   function createTestConfig(): Config {
@@ -35,13 +43,16 @@ describe('list command', () => {
   }
 
   beforeEach(() => {
-    // Clean up test directory
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+    // Create safe test directory
+    testDir = testEnv.createSafeTestDir();
     
-    // Create test directory
+    // Create test directory structure
     mkdirSync(testDir, { recursive: true });
+    
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      testEnv.cleanupSafely(testDir);
+    });
     
     // Change to test directory for relative paths
     process.chdir(testDir);
@@ -50,7 +61,7 @@ describe('list command', () => {
     process.env.HOME = join(testDir, 'home');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     // Restore original home directory
     if (originalHome) {
       process.env.HOME = originalHome;
@@ -58,13 +69,8 @@ describe('list command', () => {
       delete process.env.HOME;
     }
     
-    // Change back to original directory
-    process.chdir(join(testDir, '..'));
-    
-    // Clean up test directory
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true });
-    }
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('executeList', () => {

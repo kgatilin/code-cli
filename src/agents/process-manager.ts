@@ -67,7 +67,7 @@ export async function getProcessStatus(): Promise<ProcessStatus> {
     logDebug('ProcessManager', 'Process running check', { pid, running: processRunning });
     
     if (processRunning) {
-      // Also check if port is actually accessible
+      // Also check if port is actually in use (not available)
       const portAvailable = await isPortAvailable(port);
       if (portAvailable) {
         logWarning('ProcessManager', 'Process is running but port is not in use', { pid, port });

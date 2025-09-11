@@ -44,6 +44,12 @@ npm run dev        # Direct TS execution via tsx for testing
 - **commands/newtask.ts**: Creates new task branches with directory structure
 - **commands/agents.ts**: Manages local LLM proxy server with start/stop/status/restart actions
 
+### Test Utilities
+- **tests/utils/test-environment.ts**: Safe test directory management with OS temp directory enforcement and path validation
+- **tests/utils/test-process-manager.ts**: Process lifecycle management with automatic cleanup and port allocation
+- **tests/utils/test-config.ts**: Isolated test configuration generation and environment mocking
+- **tests/utils/cleanup-manager.ts**: Coordinated cleanup with global handlers and timeout management
+
 ## How It Works
 
 ### Prompt Execution Flow
@@ -104,6 +110,9 @@ MCP server configuration via `~/.code-cli/mcp.json`:
 
 - **Test Framework**: Vitest with Node environment
 - **Test Location**: `tests/` directory mirrors `src/` structure
+- **Test Utilities**: Located in `tests/utils/` for test infrastructure (not `src/`)
+- **Safety First**: All test artifacts created in OS temp directory, never in project root
+- **Process Management**: Automatic cleanup of spawned processes with test environment detection
 - **Mock Strategy**: Use `memfs` for file system operations, minimal mocking elsewhere
 - **Coverage**: All core modules have comprehensive test suites
 - **Agent Testing**: Extensive test coverage with 18 test suites for agents module including MCP integration (config, server, orchestrator, process management, error handling, logging, MCP config, MCP client manager)

@@ -1,7 +1,27 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups 
+} from './utils/index.js';
+
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+let testHomeDir: string;
+
+// Mock the os module to use safe test directory
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    homedir: () => testHomeDir
+  };
+});
+
+// Import after mocking
 import { 
   getGlobalResourcePath, 
   ensureGlobalDirectory, 
@@ -12,31 +32,32 @@ import {
 } from '../src/global-resources.js';
 
 describe('global-resources', () => {
-  const testHomeDir = join(process.cwd(), 'test-home');
   const originalHome = process.env.HOME;
 
   beforeEach(() => {
+    // Create safe test directory
+    testHomeDir = testEnv.createSafeTestDir();
+    
     // Mock home directory for testing
     process.env.HOME = testHomeDir;
     
-    // Clean up any existing test directory
-    if (existsSync(testHomeDir)) {
-      rmSync(testHomeDir, { recursive: true, force: true });
-    }
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      // Restore original home directory
+      if (originalHome) {
+        process.env.HOME = originalHome;
+      } else {
+        delete process.env.HOME;
+      }
+      
+      // Clean up test files safely
+      testEnv.cleanupSafely(testHomeDir);
+    });
   });
 
-  afterEach(() => {
-    // Restore original home directory
-    if (originalHome) {
-      process.env.HOME = originalHome;
-    } else {
-      delete process.env.HOME;
-    }
-    
-    // Clean up test directory
-    if (existsSync(testHomeDir)) {
-      rmSync(testHomeDir, { recursive: true, force: true });
-    }
+  afterEach(async () => {
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('getGlobalResourcePath', () => {
@@ -138,7 +159,7 @@ describe('global-resources', () => {
 
   describe('validateSymlink', () => {
     it('returns true for valid symlink', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       ensureGlobalDirectory();
@@ -155,7 +176,7 @@ describe('global-resources', () => {
       expect(validateSymlink(symlinkPath, targetPath)).toBe(true);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('returns false for non-existent symlink', () => {
@@ -166,7 +187,7 @@ describe('global-resources', () => {
     });
 
     it('returns false for symlink pointing to wrong target', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       const symlinkPath = join(testProjectDir, 'link');
@@ -181,13 +202,13 @@ describe('global-resources', () => {
       expect(validateSymlink(symlinkPath, expectedTarget)).toBe(false);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
   });
 
   describe('setupProjectSymlinks', () => {
     it('creates symlinks for all resource types', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       // Setup global resources
@@ -222,11 +243,11 @@ describe('global-resources', () => {
       )).toBe(true);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('creates parent directories if they do not exist', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       ensureGlobalDirectory();
@@ -242,11 +263,11 @@ describe('global-resources', () => {
       expect(existsSync(join(testProjectDir, '.claude', 'prompts', 'global'))).toBe(true);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('does not fail if symlinks already exist', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       ensureGlobalDirectory();
@@ -255,23 +276,23 @@ describe('global-resources', () => {
       expect(() => setupProjectSymlinks(testProjectDir)).not.toThrow();
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('throws error when global resources do not exist', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       expect(() => setupProjectSymlinks(testProjectDir)).toThrow('Global resources not available');
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
   });
 
   describe('removeSymlinks', () => {
     it('removes all symlinks for project', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       ensureGlobalDirectory();
@@ -296,21 +317,21 @@ describe('global-resources', () => {
       expect(existsSync(join(claudeDir, 'snippets'))).toBe(true);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('does not fail if symlinks do not exist', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       expect(() => removeSymlinks(testProjectDir)).not.toThrow();
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
 
     it('does not remove non-symlink files', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       const claudeDir = join(testProjectDir, '.claude');
@@ -326,7 +347,7 @@ describe('global-resources', () => {
       expect(existsSync(globalFile)).toBe(true);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
   });
 
@@ -348,7 +369,7 @@ describe('global-resources', () => {
     });
 
     it('provides complete project symlink workflow', () => {
-      const testProjectDir = join(process.cwd(), 'test-project');
+      const testProjectDir = testEnv.createSafeTestDir();
       mkdirSync(testProjectDir, { recursive: true });
       
       // Setup global resources
@@ -373,7 +394,7 @@ describe('global-resources', () => {
       expect(existsSync(join(claudeDir, 'prompts', 'global'))).toBe(false);
       
       // Cleanup
-      rmSync(testProjectDir, { recursive: true, force: true });
+      testEnv.cleanupSafely(testProjectDir);
     });
   });
 });

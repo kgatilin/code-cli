@@ -1,13 +1,35 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { writeFileSync, existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 import type { AgentConfig, ProcessStatus } from '../src/types.js';
+import { 
+  TestEnvironment, 
+  registerCleanup, 
+  executeAllCleanups,
+  testProcessManager 
+} from './utils/index.js';
 
-// Mock the os module at the top level
-const testHomeDir = join(process.cwd(), 'test-home-process');
-vi.mock('os', () => ({
-  homedir: () => testHomeDir
-}));
+// Create safe test environment
+const testEnv = new TestEnvironment({ debug: false });
+let testHomeDir: string;
+
+// Mock the os module to use safe test directory
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    homedir: () => testHomeDir
+  };
+});
+
+// Mock the server module to control port availability checks
+vi.mock('../src/agents/server.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    isPortAvailable: vi.fn()
+  };
+});
 
 // Import after mocking
 import { 
@@ -16,9 +38,10 @@ import {
   getProcessStatus,
   getPidFilePath
 } from '../src/agents/process-manager.js';
+import { isPortAvailable } from '../src/agents/server.js';
 
 describe('agents/process-manager', () => {
-  const testCodeCliDir = join(testHomeDir, '.code-cli');
+  let testCodeCliDir: string;
   const testConfig: AgentConfig = {
     VERTEX_AI_PROJECT: 'test-project',
     VERTEX_AI_LOCATION: 'us-central1',
@@ -28,20 +51,35 @@ describe('agents/process-manager', () => {
   };
 
   beforeEach(() => {
+    // Reset mocks
+    vi.clearAllMocks();
+    
+    // Default mock behavior: port is available (not in use)
+    vi.mocked(isPortAvailable).mockResolvedValue(true);
+    
+    // Create safe test directory
+    testHomeDir = testEnv.createSafeTestDir();
+    testCodeCliDir = join(testHomeDir, '.code-cli');
+    
     // Create test directory structure
     if (!existsSync(testCodeCliDir)) {
       mkdirSync(testCodeCliDir, { recursive: true });
     }
+
+    // Register cleanup for this test
+    registerCleanup(async () => {
+      // Kill any running processes
+      await killServerProcess();
+      await testProcessManager.killAll();
+      
+      // Clean up test files safely
+      testEnv.cleanupSafely(testHomeDir);
+    });
   });
 
   afterEach(async () => {
-    // Kill any running processes
-    await killServerProcess();
-    
-    // Clean up test files
-    if (existsSync(testHomeDir)) {
-      rmSync(testHomeDir, { recursive: true, force: true });
-    }
+    // Execute all registered cleanups
+    await executeAllCleanups();
   });
 
   describe('getPidFilePath', () => {
@@ -76,6 +114,9 @@ describe('agents/process-manager', () => {
     });
 
     it('should parse PID file correctly when process exists', async () => {
+      // Mock port as not available (i.e., in use by server)
+      vi.mocked(isPortAvailable).mockResolvedValue(false);
+      
       // Create PID file with current process PID (which we know exists)
       const pidFilePath = getPidFilePath();
       writeFileSync(pidFilePath, `${process.pid}\n${testConfig.PROXY_PORT}`);
@@ -103,6 +144,9 @@ describe('agents/process-manager', () => {
 
   describe('spawnServerProcess', () => {
     it('should return error if server is already running', async () => {
+      // Mock port as not available (i.e., in use by server)
+      vi.mocked(isPortAvailable).mockResolvedValue(false);
+      
       // Create fake PID file
       const pidFilePath = getPidFilePath();
       writeFileSync(pidFilePath, `${process.pid}\n${testConfig.PROXY_PORT}`);
@@ -115,6 +159,9 @@ describe('agents/process-manager', () => {
     });
 
     it('should return error if port is not available', async () => {
+      // Mock port as not available (i.e., already in use by another process)
+      vi.mocked(isPortAvailable).mockResolvedValue(false);
+      
       const result = await spawnServerProcess({
         ...testConfig,
         PROXY_PORT: 80 // Use port that's likely unavailable
