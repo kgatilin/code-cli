@@ -30,13 +30,18 @@ npm run dev        # Direct TS execution via tsx for testing
 ### Agents Module
 - **agents/config.ts**: Environment configuration management for agent proxy server
 - **agents/server.ts**: Express.js server providing OpenAI-compatible API endpoints
-- **agents/orchestrator.ts**: OpenAI to Google Vertex AI format conversion, request orchestration, MCP tool integration with diagnostic logging wrapper, timeout detection (30s), and request ID tracking
+- **agents/orchestrator.ts**: OpenAI to Google Vertex AI format conversion, request orchestration with dynamic prompt composition, MCP tool integration with diagnostic logging wrapper, timeout detection (30s), and request ID tracking
 - **agents/process-manager.ts**: Background server process lifecycle management with PID tracking
 - **agents/error-handler.ts**: Google AI error parsing and OpenAI-compatible error formatting
 - **agents/logger.ts**: File-based logging system with EPIPE resilience for detached processes
 - **agents/filesystem-helper.ts**: Path resolution and validation utilities for MCP filesystem operations with enhanced error context
 - **agents/mcp-config.ts**: Loads MCP server configurations from ~/.code-cli/mcp.json with validation
 - **agents/mcp-client-manager.ts**: Manages MCP client lifecycle using SDK's Client and StdioClientTransport
+- **agents/prompt-directive.ts**: Detects and extracts `{{prompt:...}}` directives from user messages for dynamic prompt composition
+- **agents/prompt-metadata.ts**: Parses YAML frontmatter metadata from prompt files for model and parameter configuration
+- **agents/prompt-config.ts**: Loads prompt configuration from environment variables (PROMPTS_BASE_PATH, SYSTEM_PROMPT_PATH)
+- **agents/prompt-resolver.ts**: Resolves prompt references and integrates with existing prompt-loader for template expansion
+- **agents/request-preprocessor.ts**: Preprocesses requests to scan messages for directives and combine base/dynamic prompts
 
 ### Command System
 - **commands/index.ts**: Router for utility commands
@@ -93,6 +98,8 @@ VERTEX_AI_LOCATION=us-central1       # Required: Vertex AI region
 VERTEX_AI_MODEL=gemini-2.0-flash-exp # Required: Model name
 PROXY_PORT=11434                     # Optional: Server port (default: 11434)
 DEBUG_MODE=false                     # Optional: Enable debug logging (default: false)
+PROMPTS_BASE_PATH=/path/to/prompts   # Optional: Base directory for dynamic prompts
+SYSTEM_PROMPT_PATH=base/system.md    # Optional: Base system prompt path (relative to PROMPTS_BASE_PATH)
 ```
 
 MCP server configuration via `~/.code-cli/mcp.json`:

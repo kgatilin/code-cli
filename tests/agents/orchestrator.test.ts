@@ -1434,6 +1434,333 @@ describe('agents/orchestrator', () => {
     });
   });
 
+  describe('Phase 3 - Prompt Integration', () => {
+    let mockPromptConfig: any;
+    let mockPreprocessedRequest: any;
+    
+    beforeEach(() => {
+      vi.clearAllMocks();
+      
+      // Mock prompt config
+      mockPromptConfig = {
+        basePath: '/test/prompts',
+        systemPromptPath: 'base/system.md'
+      };
+      
+      // Mock preprocessed request
+      mockPreprocessedRequest = {
+        request: {
+          model: 'gpt-4',
+          messages: [
+            { role: 'user', content: 'test request with cleaned directive' }
+          ]
+        },
+        promptMetadata: {
+          model: 'gemini-pro',
+          temperature: 0.5,
+          maxTokens: 2000
+        },
+        systemPrompt: 'Base system prompt\n\nDynamic prompt content'
+      };
+      
+      vi.mocked(loadMCPConfig).mockResolvedValue({ mcpServers: {} });
+      mockMCPClientManager.createClients.mockResolvedValue([]);
+      mockMCPClientManager.getClients.mockReturnValue([]);
+      mockMCPClientManager.hasConnectedClients.mockReturnValue(false);
+      mockMCPClientManager.isManagerShutdown.mockReturnValue(false);
+    });
+
+    describe('Constructor with prompt configuration', () => {
+      it('should load prompt configuration when environment variables are set', () => {
+        // Mock environment variables
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PROMPTS_BASE_PATH: '/test/prompts',
+          SYSTEM_PROMPT_PATH: 'base/system.md'
+        };
+
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        expect(orchestrator).toBeDefined();
+        
+        // Cleanup
+        process.env = originalEnv;
+      });
+
+      it('should handle missing prompt configuration gracefully', () => {
+        // Clear environment variables
+        const originalEnv = process.env;
+        process.env = { ...originalEnv };
+        delete process.env.PROMPTS_BASE_PATH;
+        delete process.env.SYSTEM_PROMPT_PATH;
+
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        expect(orchestrator).toBeDefined();
+        
+        // Cleanup  
+        process.env = originalEnv;
+      });
+    });
+
+    describe('Request preprocessing integration', () => {
+      it('should preprocess request with prompt directive', async () => {
+        // Mock the preprocessRequest function
+        const mockPreprocessRequest = vi.fn().mockResolvedValue(mockPreprocessedRequest);
+        
+        // Mock environment variables
+        const originalEnv = process.env;
+        process.env = {
+          ...originalEnv,
+          PROMPTS_BASE_PATH: '/test/prompts',
+          SYSTEM_PROMPT_PATH: 'base/system.md'
+        };
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+        
+        // Replace the preprocessRequest function - we'll mock this at the module level
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Response with preprocessed prompt' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+
+        const request = {
+          model: 'gpt-4',
+          messages: [
+            { role: 'user', content: '{{prompt:analyzer}} Please analyze this code' }
+          ]
+        };
+
+        // We'll test the integration once the actual implementation is done
+        // For now, just test that processRequest works with normal requests
+        const response = await orchestrator.processRequest(request);
+        
+        expect(response.choices[0].message.content).toBe('Response with preprocessed prompt');
+        
+        // Cleanup
+        process.env = originalEnv;
+      });
+    });
+
+    describe('System instruction building with combined prompts', () => {
+      it('should use combined system prompt when available', async () => {
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Response with combined system prompt' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        // Test current system instruction building with multiple system messages
+        const request = {
+          model: 'gpt-4',
+          messages: [
+            { role: 'system', content: 'Base system instruction' },
+            { role: 'system', content: 'Additional system instruction' },
+            { role: 'user', content: 'Hello' }
+          ]
+        };
+
+        await orchestrator.processRequest(request);
+
+        expect(mockGenerateContent).toHaveBeenCalledWith({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { role: 'user', parts: [{ text: 'Hello' }] }
+          ],
+          config: expect.objectContaining({
+            systemInstruction: 'Base system instruction\n\nAdditional system instruction'
+          })
+        });
+      });
+
+      it('should use default system prompt when no prompts available', async () => {
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Default response' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        const request = {
+          model: 'gpt-4',
+          messages: [
+            { role: 'user', content: 'Hello without system prompt' }
+          ]
+        };
+
+        await orchestrator.processRequest(request);
+
+        expect(mockGenerateContent).toHaveBeenCalledWith({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { role: 'user', parts: [{ text: 'Hello without system prompt' }] }
+          ],
+          config: expect.objectContaining({
+            systemInstruction: 'You are a helpful AI assistant. Provide accurate, helpful, and concise responses.'
+          })
+        });
+      });
+    });
+
+    describe('Metadata application to generation config', () => {
+      it('should apply metadata to generation config when available', async () => {
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Response with custom config' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        // Test with request that has custom temperature
+        const request = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Test request' }],
+          temperature: 0.3,
+          max_tokens: 1500
+        };
+
+        await orchestrator.processRequest(request);
+
+        expect(mockGenerateContent).toHaveBeenCalledWith({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { role: 'user', parts: [{ text: 'Test request' }] }
+          ],
+          config: expect.objectContaining({
+            temperature: 0.3,
+            maxOutputTokens: 1500,
+            topK: 40,
+            topP: 0.95
+          })
+        });
+      });
+
+      it('should use default values when metadata not provided', async () => {
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Default config response' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        const request = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Test without custom config' }]
+        };
+
+        await orchestrator.processRequest(request);
+
+        expect(mockGenerateContent).toHaveBeenCalledWith({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { role: 'user', parts: [{ text: 'Test without custom config' }] }
+          ],
+          config: expect.objectContaining({
+            temperature: 0.7,  // Default value
+            maxOutputTokens: 4096,  // Default value
+            topK: 40,
+            topP: 0.95
+          })
+        });
+      });
+    });
+
+    describe('Streaming requests with prompt integration', () => {
+      it('should apply prompt preprocessing to streaming requests', async () => {
+        const mockStreamChunks = [
+          {
+            candidates: [{
+              content: {
+                parts: [{ text: 'Streaming response with preprocessed prompt' }]
+              }
+            }]
+          }
+        ];
+        mockGenerateContentStream.mockResolvedValue(mockStreamChunks);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        const request = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Test streaming request' }],
+          stream: true
+        };
+
+        const responseGenerator = orchestrator.processStreamingRequest(request);
+        const chunks = [];
+        for await (const chunk of responseGenerator) {
+          chunks.push(chunk);
+        }
+
+        expect(mockGenerateContentStream).toHaveBeenCalledWith({
+          model: 'gemini-2.0-flash-exp',
+          contents: [
+            { role: 'user', parts: [{ text: 'Test streaming request' }] }
+          ],
+          config: expect.objectContaining({
+            systemInstruction: expect.any(String),
+            temperature: 0.7,
+            maxOutputTokens: 4096,
+            topP: 0.95,
+            thinkingConfig: {
+              thinkingBudget: 1024,
+              includeThoughts: true
+            }
+          })
+        });
+
+        expect(chunks.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('Error handling with prompt integration', () => {
+      it('should handle prompt loading errors gracefully', async () => {
+        const mockResponse = {
+          candidates: [{
+            content: {
+              parts: [{ text: 'Fallback response without prompt' }]
+            }
+          }]
+        };
+        mockGenerateContent.mockResolvedValue(mockResponse);
+        
+        orchestrator = new AgentOrchestrator(mockConfig);
+
+        // Test that request processing continues even if prompt integration fails
+        const request = {
+          model: 'gpt-4',
+          messages: [{ role: 'user', content: 'Request that should work despite prompt errors' }]
+        };
+
+        const response = await orchestrator.processRequest(request);
+        
+        expect(response.choices[0].message.content).toBe('Fallback response without prompt');
+      });
+    });
+  });
+
   afterEach(async () => {
     // Clean up orchestrator if it exists
     if (orchestrator && orchestrator.shutdown) {

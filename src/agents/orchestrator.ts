@@ -6,12 +6,16 @@ import type {
   OpenAIStreamChunk, 
   OpenAIMessage, 
   OpenAIContentPart,
-  AgentConfig 
+  AgentConfig,
+  PromptConfig,
+  ProcessedRequest 
 } from '../types.js';
 import { logDebug, logInfo, logError, logWarning } from './logger.js';
 import { MCPClientManager } from './mcp-client-manager.js';
 import { loadMCPConfig } from './mcp-config.js';
 import { FilesystemHelper } from './filesystem-helper.js';
+import { loadPromptConfig } from './prompt-config.js';
+import { preprocessRequest } from './request-preprocessor.js';
 
 /**
  * Agent orchestrator for LLM interactions using Google Vertex AI
@@ -24,6 +28,7 @@ export class AgentOrchestrator {
   private mcpInitializationPromise?: Promise<void>;
   private filesystemHelper: FilesystemHelper;
   private requestCounter: number = 0;
+  private promptConfig: PromptConfig | undefined;
 
   constructor(private config: AgentConfig) {
     // Initialize Google Generative AI client
@@ -37,10 +42,25 @@ export class AgentOrchestrator {
     // Initialize filesystem helper for enhanced error messaging
     this.filesystemHelper = new FilesystemHelper();
     
+    // Load prompt configuration if available
+    try {
+      this.promptConfig = loadPromptConfig();
+      logInfo('Orchestrator', 'Loaded prompt configuration', {
+        basePath: this.promptConfig.basePath,
+        systemPromptPath: this.promptConfig.systemPromptPath
+      });
+    } catch (error) {
+      logDebug('Orchestrator', 'No prompt configuration available, dynamic prompts disabled', {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      this.promptConfig = undefined;
+    }
+    
     logInfo('Orchestrator', 'Initialized with Google AI client', {
       project: config.VERTEX_AI_PROJECT,
       location: config.VERTEX_AI_LOCATION,
-      model: config.VERTEX_AI_MODEL
+      model: config.VERTEX_AI_MODEL,
+      promptsEnabled: !!this.promptConfig
     });
 
     // Initialize MCP client manager asynchronously
@@ -267,9 +287,38 @@ export class AgentOrchestrator {
     });
 
     try {
-      // Convert OpenAI messages to Google AI format
-      const contents = this.buildContents(request.messages);
-      const systemInstructions = this.buildSystemInstructions(request);
+      // Preprocess request for dynamic prompt composition if enabled
+      let processedRequest: ProcessedRequest;
+      if (this.promptConfig) {
+        try {
+          processedRequest = await preprocessRequest(request, this.promptConfig);
+          logDebug('Orchestrator', 'Request preprocessed with prompt integration', {
+            requestId,
+            hasPromptMetadata: !!processedRequest.promptMetadata,
+            systemPromptLength: processedRequest.systemPrompt.length
+          });
+        } catch (error) {
+          logWarning('Orchestrator', 'Prompt preprocessing failed, using original request', {
+            requestId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Fallback to original request processing
+          processedRequest = {
+            request,
+            systemPrompt: this.buildSystemInstructions(request)
+          };
+        }
+      } else {
+        // No prompt config available, use original request processing
+        processedRequest = {
+          request,
+          systemPrompt: this.buildSystemInstructions(request)
+        };
+      }
+
+      // Convert OpenAI messages to Google AI format using processed request
+      const contents = this.buildContents(processedRequest.request.messages);
+      const systemInstructions = processedRequest.systemPrompt;
 
       logDebug('Orchestrator', 'Converted messages to Google AI format', {
         requestId,
@@ -283,18 +332,12 @@ export class AgentOrchestrator {
       // Update hasTools flag for logging
       logDebug('Orchestrator', 'Starting request', {
         requestId,
-        messageCount: request.messages?.length || 0,
+        messageCount: processedRequest.request.messages?.length || 0,
         hasTools: tools.length > 0
       });
       
-      // Generate response using Google AI
-      const config = {
-        systemInstruction: systemInstructions,
-        temperature: request.temperature ?? 0.7,
-        maxOutputTokens: request.max_tokens ?? 4096,
-        topK: 40,
-        topP: 0.95,
-      } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
+      // Generate response using Google AI with metadata-enhanced config
+      const config = this.buildGenerationConfig(processedRequest, request);
 
       // Add tools if available
       if (tools.length > 0) {
@@ -337,6 +380,31 @@ export class AgentOrchestrator {
   }
 
   /**
+   * Build generation configuration with metadata from processed request
+   */
+  private buildGenerationConfig(processedRequest: ProcessedRequest, originalRequest: OpenAIRequest): GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] } {
+    const config = {
+      systemInstruction: processedRequest.systemPrompt,
+      // Apply metadata from prompts, with original request taking precedence
+      temperature: originalRequest.temperature ?? processedRequest.promptMetadata?.temperature ?? 0.7,
+      maxOutputTokens: originalRequest.max_tokens ?? processedRequest.promptMetadata?.maxTokens ?? 4096,
+      topK: processedRequest.promptMetadata?.topK ?? 40,
+      topP: processedRequest.promptMetadata?.topP ?? 0.95,
+    } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
+
+    logDebug('Orchestrator', 'Built generation config with metadata', {
+      hasMetadata: !!processedRequest.promptMetadata,
+      temperature: config.temperature,
+      maxOutputTokens: config.maxOutputTokens,
+      topK: config.topK,
+      topP: config.topP,
+      systemPromptLength: processedRequest.systemPrompt.length
+    });
+
+    return config;
+  }
+
+  /**
    * Process OpenAI streaming request and return streaming chunks
    */
   async* processStreamingRequest(request: OpenAIRequest): AsyncIterable<OpenAIStreamChunk> {
@@ -350,9 +418,38 @@ export class AgentOrchestrator {
     });
 
     try {
-      // Convert OpenAI messages to Google AI format
-      const contents = this.buildContents(request.messages);
-      const systemInstructions = this.buildSystemInstructions(request);
+      // Preprocess request for dynamic prompt composition if enabled
+      let processedRequest: ProcessedRequest;
+      if (this.promptConfig) {
+        try {
+          processedRequest = await preprocessRequest(request, this.promptConfig);
+          logDebug('Orchestrator', 'Streaming request preprocessed with prompt integration', {
+            requestId,
+            hasPromptMetadata: !!processedRequest.promptMetadata,
+            systemPromptLength: processedRequest.systemPrompt.length
+          });
+        } catch (error) {
+          logWarning('Orchestrator', 'Prompt preprocessing failed for streaming request, using original request', {
+            requestId,
+            error: error instanceof Error ? error.message : String(error)
+          });
+          // Fallback to original request processing
+          processedRequest = {
+            request,
+            systemPrompt: this.buildSystemInstructions(request)
+          };
+        }
+      } else {
+        // No prompt config available, use original request processing
+        processedRequest = {
+          request,
+          systemPrompt: this.buildSystemInstructions(request)
+        };
+      }
+
+      // Convert OpenAI messages to Google AI format using processed request
+      const contents = this.buildContents(processedRequest.request.messages);
+      const systemInstructions = processedRequest.systemPrompt;
 
       logDebug('Orchestrator', 'Converted messages to Google AI format', {
         requestId,
@@ -366,21 +463,18 @@ export class AgentOrchestrator {
       // Update hasTools flag for logging
       logDebug('Orchestrator', 'Starting request', {
         requestId,
-        messageCount: request.messages?.length || 0,
+        messageCount: processedRequest.request.messages?.length || 0,
         hasTools: tools.length > 0
       });
       
-      // Generate streaming response using Google AI
+      // Generate streaming response using Google AI with metadata-enhanced config
       const config = {
-        systemInstruction: systemInstructions,
-        temperature: request.temperature ?? 0.7,
-        maxOutputTokens: request.max_tokens ?? 4096,
-        topP: 0.95,
+        ...this.buildGenerationConfig(processedRequest, request),
         thinkingConfig: {
           thinkingBudget: 1024,
           includeThoughts: true,
         }
-      } as GenerationConfig & { systemInstruction?: string; tools?: CallableTool[] };
+      };
 
       // Add tools if available
       if (tools.length > 0) {

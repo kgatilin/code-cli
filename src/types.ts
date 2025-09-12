@@ -340,3 +340,57 @@ export interface MCPConfig {
   /** Map of MCP server name to configuration */
   mcpServers: Record<string, MCPServerConfig>;
 }
+
+/** Prompt directive extracted from user messages */
+export interface PromptDirective {
+  /** Extracted prompt path */
+  reference: string;
+  /** Message without directive */
+  cleanedMessage: string;
+  /** Index of message containing directive */
+  messageIndex: number;
+}
+
+/** Metadata extracted from prompt frontmatter */
+export interface PromptMetadata {
+  /** Model to use for this prompt */
+  model?: string;
+  /** Required tools for this prompt */
+  tools?: string[];
+  /** Temperature setting */
+  temperature?: number;
+  /** Maximum tokens to generate */
+  maxTokens?: number;
+  /** Top-p sampling parameter */
+  topP?: number;
+  /** Top-k sampling parameter */
+  topK?: number;
+  /** Additional metadata parameters */
+  [key: string]: unknown;
+}
+
+/** Resolved prompt with content and metadata */
+export interface ResolvedPrompt {
+  /** Prompt content without frontmatter */
+  content: string;
+  /** Extracted metadata */
+  metadata: PromptMetadata;
+}
+
+/** Configuration for prompt composition */
+export interface PromptConfig {
+  /** Base directory for prompts */
+  basePath: string;
+  /** Path to base system prompt (relative to basePath) */
+  systemPromptPath: string;
+}
+
+/** Preprocessed request with expanded prompts */
+export interface ProcessedRequest {
+  /** Modified request (with cleaned messages) */
+  request: OpenAIRequest;
+  /** Metadata to apply */
+  promptMetadata?: PromptMetadata;
+  /** Combined system prompt (base + dynamic) */
+  systemPrompt: string;
+}

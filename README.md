@@ -10,7 +10,7 @@ A powerful command-line interface for executing AI-powered prompts through Claud
 - 🎯 **Task Management**: Create and organize development tasks with branches and structured files
 - 🌍 **Global Resources**: Share prompts and templates across projects
 - ⚙️ **Flexible Configuration**: Customize paths, patterns, and model mappings via YAML
-- 🚀 **Local LLM Proxy**: OpenAI-compatible local server that proxies requests to Google Vertex AI with MCP tool support
+- 🚀 **Local LLM Proxy**: OpenAI-compatible local server that proxies requests to Google Vertex AI with MCP tool support and dynamic prompt composition
 
 ## Installation
 
@@ -140,6 +140,10 @@ VERTEX_AI_MODEL=gemini-2.0-flash-exp
 # Optional: Server settings
 PROXY_PORT=11434        # Default port (Ollama-compatible)
 DEBUG_MODE=false        # Enable debug logging
+
+# Optional: Dynamic prompt composition
+PROMPTS_BASE_PATH=/path/to/prompts   # Base directory for dynamic prompts
+SYSTEM_PROMPT_PATH=base/system.md    # Base system prompt (relative to PROMPTS_BASE_PATH)
 ```
 
 #### MCP Tool Support
@@ -307,6 +311,9 @@ code-cli agents start
 # In your applications (e.g., Obsidian Copilot):
 # Set API endpoint to: http://localhost:11434
 # The server provides OpenAI-compatible API powered by Google Vertex AI
+
+# Dynamic prompt composition: Use {{prompt:path}} syntax in messages
+# Example: "{{prompt:agents/researcher}} Find information about React hooks"
 
 # Monitor server logs (if DEBUG_MODE=true)
 tail -f ~/.code-cli/agent.log
