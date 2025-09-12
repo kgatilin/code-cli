@@ -34,8 +34,11 @@ npm link
 ### Basic Usage
 
 ```bash
-# Execute a prompt
+# Execute a prompt (interactive mode by default)
 code-cli implement "add dark mode toggle to settings"
+
+# Run in non-interactive daemon mode
+code-cli --daemon implement "automated deployment script"
 
 # Use a different engine
 code-cli -e cursor plan "refactor authentication system"

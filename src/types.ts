@@ -24,6 +24,8 @@ export interface CliOptions {
   background: boolean;
   /** Launch interactive Claude CLI session */
   interactive: boolean;
+  /** Run in non-interactive (daemon) mode */
+  daemon: boolean;
   /** Optional path to configuration file */
   configPath?: string | undefined;
 }

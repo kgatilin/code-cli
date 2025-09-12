@@ -19,7 +19,7 @@ npm run dev        # Direct TS execution via tsx for testing
 ## Architecture Overview
 
 ### Core Modules
-- **cli.ts**: Entry point - handles argument parsing, detects command type (prompt vs utility), orchestrates execution
+- **cli.ts**: Entry point - handles argument parsing (interactive by default, `-d/--daemon` for non-interactive), detects command type (prompt vs utility), orchestrates execution
 - **config-loader.ts**: Loads `.cc.yaml` configuration with sensible defaults, supports global config fallback
 - **prompt-loader.ts**: Processes prompt templates, handles includes (`{include: path}`), resolves placeholders
 - **context-builder.ts**: Gathers git branch info, agent files from previous runs, extracts review comments from code

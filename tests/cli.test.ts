@@ -15,7 +15,8 @@ describe('cli', () => {
         userText: 'add user authentication',
         dryRun: false,
         background: false,
-        interactive: false,
+        interactive: true,
+        daemon: false,
         configPath: undefined
       });
     });
@@ -31,7 +32,8 @@ describe('cli', () => {
         userText: undefined,
         dryRun: false,
         background: false,
-        interactive: false,
+        interactive: true,
+        daemon: false,
         configPath: undefined
       });
     });
@@ -75,7 +77,8 @@ describe('cli', () => {
         userText: 'check code quality',
         dryRun: true,
         background: false,
-        interactive: false,
+        interactive: true,
+        daemon: false,
         configPath: './test.yaml'
       });
     });
@@ -91,7 +94,8 @@ describe('cli', () => {
         userText: 'new feature',
         dryRun: true,
         background: false,
-        interactive: false,
+        interactive: true,
+        daemon: false,
         configPath: undefined
       });
     });
@@ -175,33 +179,14 @@ describe('cli', () => {
         userText: 'check code',
         dryRun: true,
         background: true,
-        interactive: false,
+        interactive: true,
+        daemon: false,
         configPath: undefined
       });
     });
 
-    it('parses --interactive flag', () => {
-      const argv = ['node', 'cli.js', '--interactive', 'implement', 'test feature'];
-      
-      const result = parseArguments(argv);
-
-      expect(result.interactive).toBe(true);
-      expect(result.promptName).toBe('implement');
-      expect(result.userText).toBe('test feature');
-    });
-
-    it('parses -i flag as alias for --interactive', () => {
-      const argv = ['node', 'cli.js', '-i', 'implement', 'test feature'];
-      
-      const result = parseArguments(argv);
-
-      expect(result.interactive).toBe(true);
-      expect(result.promptName).toBe('implement');
-      expect(result.userText).toBe('test feature');
-    });
-
-    it('handles interactive with other flags', () => {
-      const argv = ['node', 'cli.js', '--engine', 'claude', '-i', 'review', 'check code'];
+    it('handles daemon with other flags', () => {
+      const argv = ['node', 'cli.js', '--engine', 'claude', '-d', 'review', 'check code'];
       
       const result = parseArguments(argv);
 
@@ -211,9 +196,55 @@ describe('cli', () => {
         userText: 'check code',
         dryRun: false,
         background: false,
-        interactive: true,
+        interactive: false,
+        daemon: true,
         configPath: undefined
       });
+    });
+
+    it('parses --daemon flag', () => {
+      const argv = ['node', 'cli.js', '--daemon', 'implement', 'test feature'];
+      
+      const result = parseArguments(argv);
+
+      expect(result.interactive).toBe(false);
+      expect(result.daemon).toBe(true);
+      expect(result.promptName).toBe('implement');
+      expect(result.userText).toBe('test feature');
+    });
+
+    it('parses -d flag as alias for --daemon', () => {
+      const argv = ['node', 'cli.js', '-d', 'implement', 'test feature'];
+      
+      const result = parseArguments(argv);
+
+      expect(result.interactive).toBe(false);
+      expect(result.daemon).toBe(true);
+      expect(result.promptName).toBe('implement');
+      expect(result.userText).toBe('test feature');
+    });
+
+    it('defaults to interactive mode when no daemon flag is provided', () => {
+      const argv = ['node', 'cli.js', 'implement', 'test feature'];
+      
+      const result = parseArguments(argv);
+
+      expect(result.interactive).toBe(true);
+      expect(result.daemon).toBe(false);
+      expect(result.promptName).toBe('implement');
+      expect(result.userText).toBe('test feature');
+    });
+
+    it('throws error for old --interactive flag', () => {
+      const argv = ['node', 'cli.js', '--interactive', 'implement'];
+      
+      expect(() => parseArguments(argv)).toThrow('Unknown option: --interactive');
+    });
+
+    it('throws error for old -i flag', () => {
+      const argv = ['node', 'cli.js', '-i', 'implement'];
+      
+      expect(() => parseArguments(argv)).toThrow('Unknown option: -i');
     });
   });
 

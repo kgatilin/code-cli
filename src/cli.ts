@@ -60,6 +60,7 @@ export function parseArguments(argv: string[]): CliOptions {
     dryRun: false,
     background: false,
     interactive: false,
+    daemon: false,
     configPath: undefined
   };
 
@@ -93,8 +94,8 @@ export function parseArguments(argv: string[]): CliOptions {
     } else if (arg === '--background') {
       options.background = true;
       i += 1;
-    } else if (arg === '--interactive' || arg === '-i') {
-      options.interactive = true;
+    } else if (arg === '--daemon' || arg === '-d') {
+      options.daemon = true;
       i += 1;
     } else if (arg === '--config') {
       if (i + 1 >= args.length) {
@@ -107,6 +108,8 @@ export function parseArguments(argv: string[]): CliOptions {
       options.configPath = configValue;
       i += 2;
     } else if (arg.startsWith('--')) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else if (arg.startsWith('-') && arg.length > 1) {
       throw new Error(`Unknown option: ${arg}`);
     } else {
       nonFlagArgs.push(arg);
@@ -136,13 +139,18 @@ export function parseArguments(argv: string[]): CliOptions {
     userText = nonFlagArgs.slice(1).join(' ');
   }
 
+  // Calculate interactive mode: default to true unless daemon flag is set
+  const isDaemon = options.daemon || false;
+  const isInteractive = options.interactive || !isDaemon;
+
   const finalOptions: CliOptions = {
     engine: (options.engine as Engine) || 'claude',
     promptName,
     userText,
     dryRun: options.dryRun || false,
     background: options.background || false,
-    interactive: options.interactive || false,
+    interactive: isInteractive,
+    daemon: isDaemon,
     configPath: options.configPath
   };
 
@@ -163,7 +171,7 @@ export function printUsage(): void {
   console.log('  --engine <engine>    AI engine to use: "cursor" or "claude" (default: claude)');
   console.log('  --dry-run, -n       Show what would be executed without running');
   console.log('  --background        Run in background without real-time output');
-  console.log('  --interactive, -i   Launch interactive Claude CLI session');
+  console.log('  --daemon, -d        Run in non-interactive (daemon) mode');
   console.log('  --config <path>     Path to configuration file (default: .cc.yaml)');
   console.log('  --help, -h          Show this help message');
   console.log('');
