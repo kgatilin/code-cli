@@ -21,7 +21,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 // Import after mocking
-import { loadAgentConfig, getAgentConfigPath } from '../../src/agents/config.js';
+import { loadAgentConfig, getAgentConfigPath, loadBaseSystemPrompt } from '../../src/agents/config.js';
 
 describe('agents/config', () => {
   let testCodeCliDir: string;
@@ -208,6 +208,222 @@ describe('agents/config', () => {
         const config = loadAgentConfig();
         expect(config.DEBUG_MODE).toBe(expected);
       });
+    });
+
+    it('loads optional prompt configuration fields', () => {
+      const promptsDir = join(testHomeDir, 'prompts');
+      mkdirSync(promptsDir, { recursive: true });
+      
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp',
+        `PROMPTS_BASE_PATH=${promptsDir}`,
+        'SYSTEM_PROMPT_PATH=base/system.md'
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      const config = loadAgentConfig();
+      
+      expect(config.PROMPTS_BASE_PATH).toBe(promptsDir);
+      expect(config.SYSTEM_PROMPT_PATH).toBe('base/system.md');
+    });
+
+    it('handles absence of optional prompt configuration fields', () => {
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp'
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      const config = loadAgentConfig();
+      
+      expect(config.PROMPTS_BASE_PATH).toBeUndefined();
+      expect(config.SYSTEM_PROMPT_PATH).toBeUndefined();
+    });
+
+    it('validates PROMPTS_BASE_PATH exists when provided', () => {
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp',
+        'PROMPTS_BASE_PATH=/nonexistent/path',
+        'SYSTEM_PROMPT_PATH=base/system.md'
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      expect(() => loadAgentConfig()).toThrow(/PROMPTS_BASE_PATH does not exist/);
+    });
+
+    it('requires SYSTEM_PROMPT_PATH when PROMPTS_BASE_PATH is provided', () => {
+      const promptsDir = join(testHomeDir, 'prompts');
+      mkdirSync(promptsDir, { recursive: true });
+      
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp',
+        `PROMPTS_BASE_PATH=${promptsDir}`
+        // Missing SYSTEM_PROMPT_PATH
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      expect(() => loadAgentConfig()).toThrow(/SYSTEM_PROMPT_PATH is required when PROMPTS_BASE_PATH is provided/);
+    });
+
+    it('handles whitespace in prompt configuration paths', () => {
+      const promptsDir = join(testHomeDir, 'prompts');
+      mkdirSync(promptsDir, { recursive: true });
+      
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp',
+        `PROMPTS_BASE_PATH=  ${promptsDir}  `,
+        'SYSTEM_PROMPT_PATH=  base/system.md  '
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      const config = loadAgentConfig();
+      
+      expect(config.PROMPTS_BASE_PATH).toBe(promptsDir);
+      expect(config.SYSTEM_PROMPT_PATH).toBe('base/system.md');
+    });
+    
+    it('handles quoted prompt configuration paths', () => {
+      const promptsDir = join(testHomeDir, 'prompts');
+      mkdirSync(promptsDir, { recursive: true });
+      
+      const envContent = [
+        'VERTEX_AI_PROJECT=test-project',
+        'VERTEX_AI_LOCATION=us-central1',
+        'VERTEX_AI_MODEL=gemini-2.0-flash-exp',
+        `PROMPTS_BASE_PATH="${promptsDir}"`,
+        'SYSTEM_PROMPT_PATH="base/system.md"'
+      ].join('\n');
+      
+      writeFileSync(testEnvFile, envContent);
+      
+      const config = loadAgentConfig();
+      
+      expect(config.PROMPTS_BASE_PATH).toBe(promptsDir);
+      expect(config.SYSTEM_PROMPT_PATH).toBe('base/system.md');
+    });
+  });
+
+  describe('loadBaseSystemPrompt', () => {
+    it('loads system prompt from configured path', () => {
+      // Setup test directory structure
+      const promptsDir = join(testHomeDir, 'prompts');
+      const baseDir = join(promptsDir, 'base');
+      mkdirSync(baseDir, { recursive: true });
+      
+      const systemPromptPath = join(baseDir, 'system.md');
+      const promptContent = 'You are a helpful AI assistant.';
+      writeFileSync(systemPromptPath, promptContent);
+
+      const config = {
+        VERTEX_AI_PROJECT: 'test-project',
+        VERTEX_AI_LOCATION: 'us-central1',
+        VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+        PROXY_PORT: 11434,
+        DEBUG_MODE: false,
+        PROMPTS_BASE_PATH: promptsDir,
+        SYSTEM_PROMPT_PATH: 'base/system.md'
+      };
+
+      const result = loadBaseSystemPrompt(config);
+      
+      expect(result).toBe(promptContent);
+    });
+
+    it('handles system prompt with includes', () => {
+      // Setup test directory structure
+      const promptsDir = join(testHomeDir, 'prompts');
+      const baseDir = join(promptsDir, 'base');
+      const snippetsDir = join(promptsDir, 'snippets');
+      mkdirSync(baseDir, { recursive: true });
+      mkdirSync(snippetsDir, { recursive: true });
+      
+      // Create snippet file
+      const snippetPath = join(snippetsDir, 'guidelines.md');
+      writeFileSync(snippetPath, 'Follow these guidelines.');
+      
+      // Create system prompt with include
+      const systemPromptPath = join(baseDir, 'system.md');
+      const promptContent = `You are a helpful assistant.
+
+{{include:snippets/guidelines}}
+
+Be concise and helpful.`;
+      writeFileSync(systemPromptPath, promptContent);
+
+      const config = {
+        VERTEX_AI_PROJECT: 'test-project',
+        VERTEX_AI_LOCATION: 'us-central1',
+        VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+        PROXY_PORT: 11434,
+        DEBUG_MODE: false,
+        PROMPTS_BASE_PATH: promptsDir,
+        SYSTEM_PROMPT_PATH: 'base/system.md'
+      };
+
+      const result = loadBaseSystemPrompt(config);
+      
+      expect(result).toContain('You are a helpful assistant.');
+      expect(result).toContain('Follow these guidelines.');
+      expect(result).toContain('Be concise and helpful.');
+    });
+
+    it('throws error when system prompt file does not exist', () => {
+      const config = {
+        VERTEX_AI_PROJECT: 'test-project',
+        VERTEX_AI_LOCATION: 'us-central1',
+        VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+        PROXY_PORT: 11434,
+        DEBUG_MODE: false,
+        PROMPTS_BASE_PATH: testHomeDir,
+        SYSTEM_PROMPT_PATH: 'nonexistent/system.md'
+      };
+
+      expect(() => loadBaseSystemPrompt(config)).toThrow(/Failed to load base system prompt/);
+    });
+
+    it('handles system prompt with frontmatter', () => {
+      // Setup test directory structure
+      const promptsDir = join(testHomeDir, 'prompts');
+      const baseDir = join(promptsDir, 'base');
+      mkdirSync(baseDir, { recursive: true });
+      
+      const systemPromptPath = join(baseDir, 'system.md');
+      const promptContent = `---
+model: claude-3-opus
+temperature: 0.7
+---
+
+You are a helpful AI assistant with these settings.`;
+      writeFileSync(systemPromptPath, promptContent);
+
+      const config = {
+        VERTEX_AI_PROJECT: 'test-project',
+        VERTEX_AI_LOCATION: 'us-central1',
+        VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+        PROXY_PORT: 11434,
+        DEBUG_MODE: false,
+        PROMPTS_BASE_PATH: promptsDir,
+        SYSTEM_PROMPT_PATH: 'base/system.md'
+      };
+
+      const result = loadBaseSystemPrompt(config);
+      
+      // Should load processed content (expanded includes, no frontmatter)
+      expect(result).toBe('You are a helpful AI assistant with these settings.');
     });
   });
 });

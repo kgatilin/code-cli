@@ -7,14 +7,12 @@ import type {
   OpenAIMessage, 
   OpenAIContentPart,
   AgentConfig,
-  PromptConfig,
   ProcessedRequest 
 } from '../types.js';
 import { logDebug, logInfo, logError, logWarning } from './logger.js';
 import { MCPClientManager } from './mcp-client-manager.js';
 import { loadMCPConfig } from './mcp-config.js';
 import { FilesystemHelper } from './filesystem-helper.js';
-import { loadPromptConfig } from './prompt-config.js';
 import { preprocessRequest } from './request-preprocessor.js';
 
 /**
@@ -28,7 +26,7 @@ export class AgentOrchestrator {
   private mcpInitializationPromise?: Promise<void>;
   private filesystemHelper: FilesystemHelper;
   private requestCounter: number = 0;
-  private promptConfig: PromptConfig | undefined;
+  private promptConfig: AgentConfig | undefined;
 
   constructor(private config: AgentConfig) {
     // Initialize Google Generative AI client
@@ -42,17 +40,15 @@ export class AgentOrchestrator {
     // Initialize filesystem helper for enhanced error messaging
     this.filesystemHelper = new FilesystemHelper();
     
-    // Load prompt configuration if available
-    try {
-      this.promptConfig = loadPromptConfig();
-      logInfo('Orchestrator', 'Loaded prompt configuration', {
-        basePath: this.promptConfig.basePath,
-        systemPromptPath: this.promptConfig.systemPromptPath
+    // Check if prompt configuration is available in the unified config
+    if (config.PROMPTS_BASE_PATH && config.SYSTEM_PROMPT_PATH) {
+      this.promptConfig = config;
+      logInfo('Orchestrator', 'Prompt configuration available', {
+        basePath: config.PROMPTS_BASE_PATH,
+        systemPromptPath: config.SYSTEM_PROMPT_PATH
       });
-    } catch (error) {
-      logDebug('Orchestrator', 'No prompt configuration available, dynamic prompts disabled', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+    } else {
+      logDebug('Orchestrator', 'No prompt configuration available, dynamic prompts disabled');
       this.promptConfig = undefined;
     }
     
@@ -291,7 +287,7 @@ export class AgentOrchestrator {
       let processedRequest: ProcessedRequest;
       if (this.promptConfig) {
         try {
-          processedRequest = await preprocessRequest(request, this.promptConfig);
+          processedRequest = preprocessRequest(request, this.promptConfig);
           logDebug('Orchestrator', 'Request preprocessed with prompt integration', {
             requestId,
             hasPromptMetadata: !!processedRequest.promptMetadata,
@@ -422,7 +418,7 @@ export class AgentOrchestrator {
       let processedRequest: ProcessedRequest;
       if (this.promptConfig) {
         try {
-          processedRequest = await preprocessRequest(request, this.promptConfig);
+          processedRequest = preprocessRequest(request, this.promptConfig);
           logDebug('Orchestrator', 'Streaming request preprocessed with prompt integration', {
             requestId,
             hasPromptMetadata: !!processedRequest.promptMetadata,

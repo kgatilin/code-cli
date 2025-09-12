@@ -165,6 +165,10 @@ export interface AgentConfig {
   PROXY_PORT: number;
   /** Enable debug logging - defaults to false */
   DEBUG_MODE: boolean;
+  /** Base directory for dynamic prompts - optional */
+  PROMPTS_BASE_PATH?: string;
+  /** Path to base system prompt (relative to PROMPTS_BASE_PATH) - optional */
+  SYSTEM_PROMPT_PATH?: string;
 }
 
 /** Valid actions for the agents command */
@@ -379,13 +383,6 @@ export interface ResolvedPrompt {
   metadata: PromptMetadata;
 }
 
-/** Configuration for prompt composition */
-export interface PromptConfig {
-  /** Base directory for prompts */
-  basePath: string;
-  /** Path to base system prompt (relative to basePath) */
-  systemPromptPath: string;
-}
 
 /** Preprocessed request with expanded prompts */
 export interface ProcessedRequest {

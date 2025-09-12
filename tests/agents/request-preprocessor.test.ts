@@ -2,14 +2,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import type { OpenAIRequest, PromptConfig } from '../../src/types.js';
+import type { OpenAIRequest, AgentConfig } from '../../src/types.js';
 
 // Import the function we're testing (will implement after tests)
 import { preprocessRequest } from '../../src/agents/request-preprocessor.js';
 
 describe('agents/request-preprocessor', () => {
   let testDir: string;
-  let promptConfig: PromptConfig;
+  let agentConfig: AgentConfig;
 
   beforeEach(async () => {
     // Create test directory structure
@@ -40,9 +40,14 @@ describe('agents/request-preprocessor', () => {
       '---\ntools: [code_interpreter]\ntemperature: 0.1\n---\nYou are a code reviewer. Analyze code for bugs, style issues, and improvements.'
     );
 
-    promptConfig = {
-      basePath: promptsDir,
-      systemPromptPath: 'base/system.md'
+    agentConfig = {
+      VERTEX_AI_PROJECT: 'test-project',
+      VERTEX_AI_LOCATION: 'us-central1',
+      VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+      PROXY_PORT: 11434,
+      DEBUG_MODE: false,
+      PROMPTS_BASE_PATH: promptsDir,
+      SYSTEM_PROMPT_PATH: 'base/system.md'
     };
   });
 
@@ -53,7 +58,7 @@ describe('agents/request-preprocessor', () => {
   });
 
   describe('preprocessRequest', () => {
-    it('processes request with no prompt directive', async () => {
+    it('processes request with no prompt directive', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -63,14 +68,14 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       expect(result.request).toEqual(request);
       expect(result.promptMetadata).toBeUndefined();
       expect(result.systemPrompt).toBe('You are a helpful AI assistant. Always be professional and accurate.');
     });
 
-    it('processes request with single prompt directive', async () => {
+    it('processes request with single prompt directive', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -80,7 +85,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // Check that the message was cleaned
       expect(result.request.messages[0].content).toBe('Find information about React hooks');
@@ -98,7 +103,7 @@ describe('agents/request-preprocessor', () => {
       );
     });
 
-    it('processes request with multiple messages, uses latest directive', async () => {
+    it('processes request with multiple messages, uses latest directive', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -116,7 +121,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // Check that the latest message was cleaned
       expect(result.request.messages[2].content).toBe('Now review this React component');
@@ -134,7 +139,7 @@ describe('agents/request-preprocessor', () => {
       );
     });
 
-    it('ignores directives in system and assistant messages', async () => {
+    it('ignores directives in system and assistant messages', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -152,7 +157,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // Only user message should be cleaned
       expect(result.request.messages[0].content).toBe('{{prompt:invalid}} This should be ignored');
@@ -166,7 +171,7 @@ describe('agents/request-preprocessor', () => {
       });
     });
 
-    it('handles multimodal content with directive', async () => {
+    it('handles multimodal content with directive', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -185,7 +190,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // Check that text content was cleaned but image preserved
       const content = result.request.messages[0].content as any[];
@@ -202,7 +207,7 @@ describe('agents/request-preprocessor', () => {
       });
     });
 
-    it('preserves original request when no directives found', async () => {
+    it('preserves original request when no directives found', () => {
       const originalRequest: OpenAIRequest = {
         messages: [
           {
@@ -216,7 +221,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(originalRequest, promptConfig);
+      const result = preprocessRequest(originalRequest, agentConfig);
 
       // Request should be unchanged
       expect(result.request).toEqual(originalRequest);
@@ -240,7 +245,7 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       expect(result.request.messages[0].content).toBe('Help me with something');
       expect(result.promptMetadata).toEqual({});
@@ -266,13 +271,13 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // Should only use dynamic prompt when base is empty
       expect(result.systemPrompt).toBe('You are a research specialist. Focus on finding accurate, well-sourced information.');
     });
 
-    it('throws error for invalid prompt reference', async () => {
+    it('throws error for invalid prompt reference', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -282,13 +287,18 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      await expect(preprocessRequest(request, promptConfig)).rejects.toThrow();
+      expect(() => preprocessRequest(request, agentConfig)).toThrow();
     });
 
-    it('throws error when base system prompt is missing', async () => {
-      const invalidConfig: PromptConfig = {
-        basePath: testDir,
-        systemPromptPath: 'nonexistent/system.md'
+    it('throws error when base system prompt is missing', () => {
+      const invalidConfig: AgentConfig = {
+        VERTEX_AI_PROJECT: 'test-project',
+        VERTEX_AI_LOCATION: 'us-central1',
+        VERTEX_AI_MODEL: 'gemini-2.0-flash-exp',
+        PROXY_PORT: 11434,
+        DEBUG_MODE: false,
+        PROMPTS_BASE_PATH: testDir,
+        SYSTEM_PROMPT_PATH: 'nonexistent/system.md'
       };
 
       const request: OpenAIRequest = {
@@ -300,22 +310,22 @@ describe('agents/request-preprocessor', () => {
         ]
       };
 
-      await expect(preprocessRequest(request, invalidConfig)).rejects.toThrow();
+      expect(() => preprocessRequest(request, invalidConfig)).toThrow();
     });
 
-    it('handles empty messages array', async () => {
+    it('handles empty messages array', () => {
       const request: OpenAIRequest = {
         messages: []
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       expect(result.request).toEqual(request);
       expect(result.promptMetadata).toBeUndefined();
       expect(result.systemPrompt).toBe('You are a helpful AI assistant. Always be professional and accurate.');
     });
 
-    it('preserves other request properties', async () => {
+    it('preserves other request properties', () => {
       const request: OpenAIRequest = {
         messages: [
           {
@@ -329,7 +339,7 @@ describe('agents/request-preprocessor', () => {
         stream: true
       };
 
-      const result = await preprocessRequest(request, promptConfig);
+      const result = preprocessRequest(request, agentConfig);
 
       // All non-message properties should be preserved
       expect(result.request.model).toBe('gpt-4');

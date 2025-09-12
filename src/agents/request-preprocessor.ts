@@ -8,13 +8,13 @@
 import type { 
   OpenAIRequest, 
   ProcessedRequest, 
-  PromptConfig,
+  AgentConfig,
   PromptDirective,
   OpenAIMessage,
   OpenAIContentPart
 } from '../types.js';
 import { findLatestDirective, cleanUserMessage } from './prompt-directive.js';
-import { loadBaseSystemPrompt } from './prompt-config.js';
+import { loadBaseSystemPrompt } from './config.js';
 import { resolvePromptReference } from './prompt-resolver.js';
 
 /**
@@ -22,15 +22,15 @@ import { resolvePromptReference } from './prompt-resolver.js';
  * expanding dynamic prompts, and combining with base system prompt.
  * 
  * @param request - The incoming OpenAI request
- * @param promptConfig - Configuration for prompt paths
+ * @param agentConfig - Unified agent configuration with prompt paths
  * @returns Processed request with expanded prompts and metadata
  */
-export async function preprocessRequest(
+export function preprocessRequest(
   request: OpenAIRequest,
-  promptConfig: PromptConfig
-): Promise<ProcessedRequest> {
+  agentConfig: AgentConfig
+): ProcessedRequest {
   // Always load base system prompt (required)
-  const baseSystemPrompt = loadBaseSystemPrompt(promptConfig);
+  const baseSystemPrompt = loadBaseSystemPrompt(agentConfig);
   
   // Scan all messages for the latest prompt directive
   const directive = findLatestDirective(request.messages);
@@ -44,7 +44,7 @@ export async function preprocessRequest(
   }
   
   // Expand the dynamic prompt and extract metadata
-  const resolvedPrompt = resolvePromptReference(directive.reference, promptConfig.basePath);
+  const resolvedPrompt = resolvePromptReference(directive.reference, agentConfig.PROMPTS_BASE_PATH!);
   
   // Clean the message that contains the directive
   const cleanedMessages = cleanMessagesWithDirective(request.messages, directive);
