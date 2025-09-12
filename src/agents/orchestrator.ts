@@ -494,6 +494,7 @@ export class AgentOrchestrator {
       const chatId = `chatcmpl-${Date.now()}`;
       const created = Math.floor(Date.now() / 1000);
       let isFirstChunk = true;
+      let isInThoughtMode = false;
 
       logDebug('Orchestrator', 'Streaming response initiated', { requestId, chatId });
 
@@ -506,6 +507,23 @@ export class AgentOrchestrator {
         if (candidate?.content?.parts) {
           for (const part of candidate.content.parts) {
             if (part.text) {
+              const isThoughtPart = part.thought === true;
+              let contentToYield = '';
+
+              // Handle thought mode transitions
+              if (isThoughtPart && !isInThoughtMode) {
+                // Entering thought mode
+                contentToYield += '<think>\n';
+                isInThoughtMode = true;
+              } else if (!isThoughtPart && isInThoughtMode) {
+                // Exiting thought mode
+                contentToYield += '\n</think>';
+                isInThoughtMode = false;
+              }
+
+              // Add the part text
+              contentToYield += part.text;
+
               // First chunk includes role
               if (isFirstChunk) {
                 yield {
@@ -530,13 +548,28 @@ export class AgentOrchestrator {
                 model: this.model,
                 choices: [{
                   index: 0,
-                  delta: { content: part.text },
+                  delta: { content: contentToYield },
                   finish_reason: null
                 }]
               };
             }
           }
         }
+      }
+
+      // Close any open thought tags before finishing
+      if (isInThoughtMode) {
+        yield {
+          id: chatId,
+          object: 'chat.completion.chunk',
+          created,
+          model: this.model,
+          choices: [{
+            index: 0,
+            delta: { content: '\n</think>' },
+            finish_reason: null
+          }]
+        };
       }
 
       // Final chunk with finish_reason
@@ -627,15 +660,43 @@ export class AgentOrchestrator {
   /**
    * Format Google AI response to OpenAI-compatible format
    */
-  private formatResponse(response: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }, request: OpenAIRequest): OpenAIResponse {
+  private formatResponse(response: { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> }, request: OpenAIRequest): OpenAIResponse {
     const chatId = `chatcmpl-${Date.now()}`;
     const created = Math.floor(Date.now() / 1000);
     
-    // Extract content from Google AI response
+    // Extract content from Google AI response with thought detection
     const candidates = response.candidates || [];
     const candidate = candidates[0];
     const parts = candidate?.content?.parts || [];
-    const content = parts.map((part) => part.text || '').join('');
+    
+    // Process parts with thought detection and wrapping
+    let content = '';
+    let isInThoughtMode = false;
+    
+    for (const part of parts) {
+      if (part.text) {
+        const isThoughtPart = part.thought === true;
+        
+        // Handle thought mode transitions
+        if (isThoughtPart && !isInThoughtMode) {
+          // Entering thought mode
+          content += '<think>\n';
+          isInThoughtMode = true;
+        } else if (!isThoughtPart && isInThoughtMode) {
+          // Exiting thought mode
+          content += '\n</think>';
+          isInThoughtMode = false;
+        }
+        
+        // Add the part text
+        content += part.text;
+      }
+    }
+    
+    // Close any open thought tags
+    if (isInThoughtMode) {
+      content += '\n</think>';
+    }
 
     // Estimate token usage (rough approximation)
     const promptTokens = this.estimateTokens(
